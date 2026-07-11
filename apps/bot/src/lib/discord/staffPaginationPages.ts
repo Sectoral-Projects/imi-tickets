@@ -8,6 +8,8 @@ import type { StaffPageKind } from '@/lib/discord/staffPagination';
 
 const COMMANDS = [
 	['contact', 'Create a shared ticket with one or more mentioned members.'],
+	['add', 'Add a member to the current ticket.'],
+	['remove', 'Remove a member from the current ticket.'],
 	['logs', 'Show previous tickets for a member.'],
 	['block', 'Block a user or role from tickets and bot commands.'],
 	['blocked', 'Show blocked users and roles.'],
@@ -57,5 +59,5 @@ export function renderStaffPage(kind: StaffPageKind, page: number, context?: str
 
 export async function canUseStaffPagination(userId: string, guildId: string | null) {
 	if (!guildId) return false;
-	return RbacService.hasGuildPermission(userId, guildId, RbacPermission.Read);
+	return RbacService.hasGuildPermission(userId, guildId, RbacPermission.Manage);
 }

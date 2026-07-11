@@ -102,9 +102,10 @@ The custom RBAC model should be server-aware and modular.
 
 - Better Auth proves the browser user identity; RBAC decides what product data/actions that user can access.
 - Staff permissions come from configured Discord roles per linked Discord server.
-- Permission flags should be stable strings or constants, starting with `READ` and `MANAGE`.
-- A role can grant `READ` only, `READ` plus `MANAGE`, or future permission combinations.
+- Permission flags should be stable strings or constants: `READ`, `MANAGE`, and `ADMIN`.
+- A role can grant `READ` only, `READ` plus `MANAGE`, or full `ADMIN` (which includes manage/read).
 - Product APIs should check permissions before returning data or mutating state.
+- `/settings` and template/settings mutations require `ADMIN`. Ticket transcript APIs require `READ`.
 - Keep RBAC logic in shared services/helpers so ticket routes, message routes, settings routes, onboarding routes, and staff routes make consistent decisions.
 - Frontend checks are affordances only; never depend on them for security.
 

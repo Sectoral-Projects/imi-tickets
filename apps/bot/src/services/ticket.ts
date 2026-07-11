@@ -27,9 +27,9 @@ export function formatMemberAlias(alias: number) {
 
 export interface CreateThreadInput {
 	userId: string;
-	/** Staff-facing guild channel or forum post id — set after provisioning. */
+	/** Staff-facing guild channel or forum post id â€” set after provisioning. */
 	channelId?: string;
-	/** Primary member DM channel id — kept for backward compatibility. */
+	/** Primary member DM channel id â€” kept for backward compatibility. */
 	dmChannelId?: string;
 	subject?: string;
 	executedBy: string;
@@ -49,7 +49,7 @@ export interface CloseThreadInput {
 }
 
 export interface ListTicketsInput {
-	/** Row offset — pass back `nextCursor` from the previous page. */
+	/** Row offset â€” pass back `nextCursor` from the previous page. */
 	cursor?: number;
 	/** Defaults to 20. */
 	limit?: number;
@@ -160,7 +160,7 @@ export abstract class TicketService {
 	/**
 	 * Paginated, filterable ticket listing, enriched with each thread's
 	 * latest message and the opening user's latest identity snapshot.
-	 * This is the single source of truth for the tickets list endpoint —
+	 * This is the single source of truth for the tickets list endpoint â€”
 	 * keep route handlers as thin wrappers around this.
 	 */
 	static listTickets(input: ListTicketsInput = {}, db: DbClient = container.sqlite): ListTicketsResult {
@@ -235,7 +235,7 @@ export abstract class TicketService {
 
 	/**
 	 * Creates a thread, registers the opening user as a participant, records
-	 * the initial status-history entry, and writes an audit log entry —
+	 * the initial status-history entry, and writes an audit log entry â€”
 	 * atomically in one transaction.
 	 */
 	static create(data: CreateThreadInput) {
@@ -369,7 +369,7 @@ export abstract class TicketService {
 		return thread;
 	}
 
-	/** Cheap, high-frequency update — no audit log, called on every inbound message. */
+	/** Cheap, high-frequency update â€” no audit log, called on every inbound message. */
 	static touchLastMessageAt(threadId: number, db: DbClient = container.sqlite) {
 		return db.update(threads).set({ lastMessageAt: new Date() }).where(eq(threads.id, threadId)).run();
 	}
@@ -418,9 +418,8 @@ export abstract class TicketService {
 				joinedAt: new Date()
 			})
 			.onConflictDoUpdate({
-				target: [threadParticipants.threadId, threadParticipants.userId],
+				target: [threadParticipants.threadId, threadParticipants.userId, threadParticipants.role],
 				set: {
-					role,
 					dmChannelId: options.dmChannelId,
 					deletedAt: null,
 					joinedAt: new Date()
@@ -441,6 +440,82 @@ export abstract class TicketService {
 				)
 			)
 			.all();
+	}
+
+	static listStaffParticipants(threadId: number, db: DbClient = container.sqlite) {
+		return db
+			.select()
+			.from(threadParticipants)
+			.where(
+				and(
+					eq(threadParticipants.threadId, threadId),
+					eq(threadParticipants.role, ParticipantRole.Staff),
+					isNull(threadParticipants.deletedAt)
+				)
+			)
+			.all();
+	}
+
+	/**
+	 * Marks a staff member as joined on this ticket. A user may also be a member
+	 * participant; staff and member roles are independent rows.
+	 */
+	static ensureStaffParticipant(threadId: number, userId: string, db: DbClient = container.sqlite) {
+		const trimmed = userId.trim();
+		if (!/^\d{17,20}$/.test(trimmed)) return false;
+		if (container.client.user?.id === trimmed) return false;
+
+		const existing = db
+			.select()
+			.from(threadParticipants)
+			.where(
+				and(
+					eq(threadParticipants.threadId, threadId),
+					eq(threadParticipants.userId, trimmed),
+					eq(threadParticipants.role, ParticipantRole.Staff)
+				)
+			)
+			.get();
+
+		if (existing && existing.deletedAt == null) return false;
+
+		if (existing) {
+			db.update(threadParticipants)
+				.set({
+					deletedAt: null,
+					joinedAt: new Date()
+				})
+				.where(
+					and(
+						eq(threadParticipants.threadId, threadId),
+						eq(threadParticipants.userId, trimmed),
+						eq(threadParticipants.role, ParticipantRole.Staff)
+					)
+				)
+				.run();
+			return true;
+		}
+
+		db.insert(threadParticipants)
+			.values({
+				threadId,
+				userId: trimmed,
+				role: ParticipantRole.Staff,
+				joinedAt: new Date()
+			})
+			.run();
+		return true;
+	}
+
+	/** Staff who joined via channel activity, with a one-time backfill from recorded staff-channel messages. */
+	static listStaffParticipantIds(threadId: number, staffChannelId: string | null | undefined, db: DbClient = container.sqlite) {
+		if (staffChannelId) {
+			for (const authorId of this.listStaffAuthorIdsFromMessages(threadId, staffChannelId, db)) {
+				this.ensureStaffParticipant(threadId, authorId, db);
+			}
+		}
+
+		return this.listStaffParticipants(threadId, db).map((participant) => participant.userId);
 	}
 
 	static listParticipants(threadId: number, db: DbClient = container.sqlite) {
@@ -539,6 +614,64 @@ export abstract class TicketService {
 
 		const alias = this.ensureMemberAlias(thread.id, userId, db);
 		return alias != null ? formatMemberAlias(alias) : fallbackTag;
+	}
+
+	static removeParticipant(threadId: number, userId: string, executedBy: string, db: DbClient = container.sqlite) {
+		const participants = this.listUserParticipants(threadId, db);
+		if (participants.length <= 1) {
+			throw new Error('Cannot remove the last member from a ticket.');
+		}
+
+		const existing = this.getUserParticipant(threadId, userId, db);
+		if (!existing) {
+			throw new Error('That member is not on this ticket.');
+		}
+
+		db.update(threadParticipants)
+			.set({ deletedAt: new Date() })
+			.where(
+				and(
+					eq(threadParticipants.threadId, threadId),
+					eq(threadParticipants.userId, userId),
+					eq(threadParticipants.role, ParticipantRole.User)
+				)
+			)
+			.run();
+
+		AuditService.log({
+			action: AuditAction.ParticipantRemoved,
+			executedBy,
+			threadId,
+			userId,
+			payload: { userId }
+		});
+
+		RealtimeService.publish({ type: 'ticket.updated', ticketId: threadId });
+		return true;
+	}
+
+	/** Distinct human authors who posted in the staff channel (excludes system/bot rows). */
+	static listStaffAuthorIdsFromMessages(threadId: number, staffChannelId: string, db: DbClient = container.sqlite) {
+		const botId = container.client.user?.id;
+		const rows = db
+			.select({ authorId: messages.authorId })
+			.from(messages)
+			.where(
+				and(eq(messages.threadId, threadId), eq(messages.channelId, staffChannelId), isNull(messages.deletedAt))
+			)
+			.all();
+
+		const staffIds = new Set<string>();
+		for (const row of rows) {
+			const authorId = row.authorId;
+			if (!authorId) continue;
+			if (botId && authorId === botId) continue;
+			if (authorId.startsWith('transcript:')) continue;
+			if (!/^\d{17,20}$/.test(authorId)) continue;
+			staffIds.add(authorId);
+		}
+
+		return [...staffIds];
 	}
 
 	static markRead(threadId: number, userId: string, db: DbClient = container.sqlite) {

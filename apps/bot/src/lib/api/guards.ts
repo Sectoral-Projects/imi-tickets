@@ -36,7 +36,7 @@ export async function requireSetupOwner(c: Context<ApiEnv>) {
 	const status = SetupService.getStatus(userId);
 
 	if (status.complete) {
-		return requireProductPermission(c, RbacPermission.Manage);
+		return requireProductPermission(c, RbacPermission.Admin);
 	}
 
 	if (!SetupService.canMutateSetup(userId)) {

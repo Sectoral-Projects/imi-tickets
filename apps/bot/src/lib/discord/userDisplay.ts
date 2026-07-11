@@ -10,7 +10,7 @@ export function formatEntityMention(entity: User | Role | APIUser | APIRole) {
 }
 
 export function getAppBaseUrl() {
-	return (process.env.APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+	return (process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(/\/$/, '');
 }
 
 export function ticketAppUrl(ticketId: number) {

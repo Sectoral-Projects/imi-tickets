@@ -21,18 +21,20 @@ import {
 } from "../utils/timeline/highlighted-messages";
 import { useAuthGate, useProductAccessRedirect } from "@/lib/use-auth-gate";
 import { useRealtime } from "@/lib/use-realtime";
-import { useSettings } from "@/features/settings/hooks/settings";
+import { useClientPreferences } from "@/features/settings/hooks/settings";
 import { ticketStatusBadgeVariant } from "../utils/status-badge";
 import { resolveTicketDisplayTitle } from "../utils/display-title";
 import { TicketDetailSkeleton } from "./ticket-detail-skeleton";
+import { TicketHeaderParticipants } from "./ticket-header-participants";
 import { MessageTimelineRow } from "./ticket-message-row";
 import { useTimelineWindow } from "./hooks/use-timeline-window";
 import {
   useTimelineVirtualizer,
-  TIMELINE_SENTINEL_SIZE_PX,
 } from "./hooks/use-timeline-virtualizer";
+import { UnauthorizedScreen } from "@/components/unauthorized-screen";
+import { ApiError } from "@/lib/api";
 
-const REPLY_JUMP_FLASH_DURATION_MS = 2750;
+const REPLY_JUMP_FLASH_DURATION_MS = 2000;
 
 function SeekOverlay() {
   return (
@@ -75,15 +77,19 @@ export function TicketContent() {
     [sortedHighlightedIds],
   );
   const hasHighlightedMode = sortedHighlightedIds.length > 0;
+  // Only deep-link / reload should seed a focused window + scroll. Click toggles
+  // of ?messageId= are UI-only and keep the current transcript in place.
+  const [openedWithHighlightDeepLink] = useState(highlightKey.length > 0);
+  const didBootstrapHighlightWindowRef = useRef(false);
   const currentUserId = session.data?.user?.id ?? null;
   const {
     data: ticket,
     isLoading: isLoadingTicket,
     error,
   } = useTicket(ticketId!);
-  const { data: settings } = useSettings();
+  const { data: preferences } = useClientPreferences(Boolean(session.data));
   const useChannelNameForTranscript = Boolean(
-    settings?.settings.useChannelNameForTranscript,
+    preferences?.useChannelNameForTranscript,
   );
   const ticketDisplayTitle = ticket
     ? resolveTicketDisplayTitle(ticket, { useChannelNameForTranscript })
@@ -95,7 +101,7 @@ export function TicketContent() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useTimeline(numericTicketId, !hasHighlightedMode);
+  } = useTimeline(numericTicketId);
 
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
@@ -112,9 +118,6 @@ export function TicketContent() {
   >(null);
   const replyJumpFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
-  );
-  const triggerReplyJumpFlashRef = useRef<(messageId: number) => void>(
-    () => {},
   );
 
   const triggerReplyJumpFlash = useCallback((messageId: number) => {
@@ -133,8 +136,6 @@ export function TicketContent() {
       }, REPLY_JUMP_FLASH_DURATION_MS);
     });
   }, []);
-
-  triggerReplyJumpFlashRef.current = triggerReplyJumpFlash;
 
   // Cleanup flash timeout on unmount
   useEffect(() => {
@@ -164,19 +165,36 @@ export function TicketContent() {
   });
 
   const usesWindowPaging = Boolean(windowState);
-  const displayedItems = useMemo(
+  const displayedItems = useMemo(() => {
+    if (windowState?.items) return windowState.items;
+    // While a deep-link highlight window is loading, keep the full transcript
+    // painted instead of blanking into a skeleton.
+    return timelineData?.items ?? [];
+  }, [windowState, timelineData?.items]);
+  const groupBreakBeforeKeys = useMemo(
     () =>
-      windowState?.items ??
-      (hasHighlightedMode ? [] : (timelineData?.items ?? [])),
-    [windowState, hasHighlightedMode, timelineData?.items],
+      new Set(
+        windowState?.groupBreakBeforeKeys ??
+          timelineData?.groupBreakBeforeKeys ??
+          [],
+      ),
+    [windowState?.groupBreakBeforeKeys, timelineData?.groupBreakBeforeKeys],
   );
+  const bootstrappingHighlightWindow =
+    openedWithHighlightDeepLink && hasHighlightedMode && !windowState;
   const contentReady =
     !isLoadingTicket &&
-    (hasHighlightedMode
-      ? Boolean(windowState)
-      : !isLoadingTimeline && Boolean(timelineData));
-  const shouldSkipBottomScroll = usesWindowPaging || hasHighlightedMode;
+    (windowState
+      ? true
+      : bootstrappingHighlightWindow
+        ? Boolean(timelineData)
+        : !isLoadingTimeline && Boolean(timelineData));
+  const shouldSkipBottomScroll = usesWindowPaging;
   const isReplyTranscriptWindow = usesWindowPaging && !hasHighlightedMode;
+
+  const requestOlderTimelinePage = useCallback(() => {
+    return fetchNextPage();
+  }, [fetchNextPage]);
 
   const {
     rowVirtualizer,
@@ -188,6 +206,7 @@ export function TicketContent() {
     finishPendingHighlightScroll,
   } = useTimelineVirtualizer({
     displayedItems,
+    groupBreakBeforeKeys,
     scrollViewportRef,
     hasHighlightedMode,
     sortedHighlightedIds,
@@ -206,12 +225,12 @@ export function TicketContent() {
     pendingScrollMessageIdRef,
     pendingReplyJumpFlashIdRef,
     didInitialScrollRef,
-    triggerReplyJumpFlashRef,
+    triggerReplyJumpFlash,
     setIsCentering,
     setIsSeeking,
     setJumpAboveId,
     setJumpBelowId,
-    fetchNextPage: () => void fetchNextPage(),
+    fetchNextPage: requestOlderTimelinePage,
     loadWindowPage,
   });
 
@@ -239,21 +258,9 @@ export function TicketContent() {
     },
   });
 
-  // Reset on ticket change
-  useEffect(() => {
-    didInitialScrollRef.current = false;
-    centeringRunningRef.current = false;
-    centerGenerationRef.current += 1;
-    pendingScrollMessageIdRef.current = null;
-    pendingReplyJumpFlashIdRef.current = null;
-    windowReasonRef.current = null;
-    setWindowState(null);
-    setReplyJumpFlashMessageId(null);
-    setIsSeeking(false);
-    setIsCentering(false);
-  }, [numericTicketId, setWindowState, windowReasonRef]);
+  // Reset on ticket change is handled by remounting via key={ticketId} in Ticket.tsx.
 
-  // Clear window when exiting highlight mode
+  // Clear deep-link highlight window when all highlights are removed
   useEffect(() => {
     if (hasHighlightedMode) return;
     if (windowReasonRef.current !== "highlight") return;
@@ -262,25 +269,28 @@ export function TicketContent() {
     setWindowState(null);
   }, [hasHighlightedMode, setWindowState, windowReasonRef]);
 
-  // Load window around first highlighted message
+  // Deep-link / reload only: seed a window around the oldest highlighted message
   useEffect(() => {
     if (!hasHighlightedMode) return;
+    if (!openedWithHighlightDeepLink) return;
+    if (didBootstrapHighlightWindowRef.current) return;
 
+    didBootstrapHighlightWindowRef.current = true;
     didInitialScrollRef.current = false;
     centeringRunningRef.current = false;
     centerGenerationRef.current += 1;
     pendingScrollMessageIdRef.current = null;
 
-    const firstHighlightedId = sortedHighlightedIds[0];
-    if (firstHighlightedId) {
+    const oldestHighlightedId = sortedHighlightedIds[0];
+    if (oldestHighlightedId) {
       queueMicrotask(() => {
-        void loadWindowAroundMessage(firstHighlightedId, false, "highlight");
+        void loadWindowAroundMessage(oldestHighlightedId, false, "highlight");
       });
     }
   }, [
     hasHighlightedMode,
-    highlightKey,
     loadWindowAroundMessage,
+    openedWithHighlightDeepLink,
     sortedHighlightedIds,
   ]);
 
@@ -327,10 +337,35 @@ export function TicketContent() {
 
   const scrollToReplyTarget = useCallback(
     (messageId: number) => {
+      const viewport = scrollViewportRef.current;
+      const existingIndex = findRenderIndexForMessage(messageId);
+
+      if (existingIndex !== -1 && viewport) {
+        const element = viewport.querySelector(
+          `[data-message-id="${messageId}"]`,
+        );
+        if (element) {
+          const elementRect = element.getBoundingClientRect();
+          const viewportRect = viewport.getBoundingClientRect();
+          const fullyVisible =
+            elementRect.top >= viewportRect.top &&
+            elementRect.bottom <= viewportRect.bottom;
+
+          if (fullyVisible) {
+            triggerReplyJumpFlash(messageId);
+            return;
+          }
+        }
+      }
+
       pendingReplyJumpFlashIdRef.current = messageId;
       scrollToMessage(messageId);
     },
-    [scrollToMessage],
+    [
+      findRenderIndexForMessage,
+      scrollToMessage,
+      triggerReplyJumpFlash,
+    ],
   );
 
   const scrollToHighlight = useCallback(
@@ -353,6 +388,11 @@ export function TicketContent() {
   if (error || errorTimeline) {
     const errorMessage = error ?? errorTimeline;
     if (!errorMessage) return <div>Error</div>;
+    if (errorMessage instanceof ApiError && errorMessage.code === "FORBIDDEN") {
+      return (
+        <UnauthorizedScreen description="You need the Read permission to view tickets." />
+      );
+    }
     return <div>Error: {errorMessage.message}</div>;
   }
 
@@ -360,17 +400,23 @@ export function TicketContent() {
     return <div>No data</div>;
   }
 
-  if (hasHighlightedMode && !windowState) {
+  // Cold deep-link with ?messageId= and no cached transcript yet — wait for the window.
+  if (
+    openedWithHighlightDeepLink &&
+    hasHighlightedMode &&
+    !windowState &&
+    !timelineData
+  ) {
     return <TicketDetailSkeleton />;
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 p-4">
-        <h1 className="text-lg font-semibold mb-2">{ticketDisplayTitle}</h1>
-        <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-          <span>
-            Status:{" "}
+      <header className="shrink-0 border-b border-border p-4">
+        <h1 className="mb-2 text-lg font-semibold">{ticketDisplayTitle}</h1>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            Status
             <Badge
               variant={ticketStatusBadgeVariant(ticket.status)}
               className="capitalize"
@@ -378,28 +424,18 @@ export function TicketContent() {
               {ticket.status}
             </Badge>
           </span>
-          <span>
-            {ticket.participants && ticket.participants.length > 1
-              ? "Participants"
-              : "User"}
-            :{" "}
-            {ticket.participants && ticket.participants.length > 0
-              ? ticket.participants
-                  .map(
-                    (participant) =>
-                      participant.user?.username ??
-                      participant.user?.globalName ??
-                      participant.userId,
-                  )
-                  .join(", ")
-              : ticket.userId}
-          </span>
+          <TicketHeaderParticipants
+            participants={ticket.participants}
+            fallbackUserId={ticket.userId}
+          />
           {ticket.hideMemberIdentities ? (
             <Badge variant="outline" className="text-xs">
               Private identities
             </Badge>
           ) : null}
-          <span>Opened: {new Date(ticket.createdAt).toLocaleString()}</span>
+          <span className="whitespace-nowrap">
+            Opened {new Date(ticket.createdAt).toLocaleString()}
+          </span>
         </div>
       </header>
 
@@ -427,7 +463,6 @@ export function TicketContent() {
           onViewportScroll={handleTimelineScroll}
         >
           <div
-            ref={rowVirtualizer.containerRef}
             className="relative w-full"
             style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
           >
@@ -453,17 +488,6 @@ export function TicketContent() {
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                 >
-                  {item.kind === "older-sentinel" && (
-                    <div
-                      className="flex items-center justify-center text-sm text-muted-foreground"
-                      style={{ height: TIMELINE_SENTINEL_SIZE_PX }}
-                    >
-                      {isFetchingNextPage || windowPagingDirection === "older"
-                        ? "Loading older activity..."
-                        : null}
-                    </div>
-                  )}
-
                   {item.kind === "audit" && (
                     <Marker variant="separator">
                       <MarkerContent>{item.label}</MarkerContent>
@@ -484,22 +508,27 @@ export function TicketContent() {
                       currentUserId={currentUserId}
                     />
                   )}
-
-                  {item.kind === "newer-sentinel" && (
-                    <div
-                      className="flex items-center justify-center text-sm text-muted-foreground"
-                      style={{ height: TIMELINE_SENTINEL_SIZE_PX }}
-                    >
-                      {windowPagingDirection === "newer"
-                        ? "Loading newer activity..."
-                        : null}
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
         </ScrollArea>
+
+        {(isFetchingNextPage || windowPagingDirection === "older") && (
+          <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
+            <p className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm">
+              Loading older activity&hellip;
+            </p>
+          </div>
+        )}
+
+        {windowPagingDirection === "newer" && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center">
+            <p className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm">
+              Loading newer activity&hellip;
+            </p>
+          </div>
+        )}
 
         {isSeeking && <SeekOverlay />}
 

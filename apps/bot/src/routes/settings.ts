@@ -12,13 +12,13 @@ export default class Settings extends Route {
 		app.patch(path, (c) => this.patchSettings(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async getSettings(c: Context<ApiEnv, string, BlankInput>) {
 		const view = await SettingsService.getView(c.get('user')?.id ?? null);
 		return c.json(view);
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async patchSettings(c: Context<ApiEnv, string, BlankInput>) {
 		const body = await c.req.json<UpdateSettingsInput>().catch(() => null);
 		if (!body) {

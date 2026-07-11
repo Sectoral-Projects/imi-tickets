@@ -1,6 +1,7 @@
 export const TemplateButtonCustomIdPrefix = 'msg_btn:';
 export const TemplateModalButtonCustomIdPrefix = 'msg_modal:';
 export const ModalSubmitCustomIdPrefix = 'modal_submit:';
+export const ModalRetryCustomIdPrefix = 'modal_retry:';
 
 export function buildMessageButtonCustomId(templateId: string) {
 	return `${TemplateButtonCustomIdPrefix}${templateId}`;
@@ -35,6 +36,18 @@ export function buildEmbeddedModalSubmitCustomId(templateId: string, buttonId: s
 	return `${ModalSubmitCustomIdPrefix}tpl:${templateId}:${buttonId}`;
 }
 
+export function buildDmOpenModalRetryCustomId(buttonId: string) {
+	return `${ModalRetryCustomIdPrefix}dm:${buttonId}`;
+}
+
+export function buildChannelOpenModalRetryCustomId(buttonId: string) {
+	return `${ModalRetryCustomIdPrefix}channel:${buttonId}`;
+}
+
+export function buildEmbeddedModalRetryCustomId(templateId: string, buttonId: string) {
+	return `${ModalRetryCustomIdPrefix}tpl:${templateId}:${buttonId}`;
+}
+
 export function parseModalSubmitCustomId(customId: string) {
 	if (!customId.startsWith(ModalSubmitCustomIdPrefix)) return null;
 	const rest = customId.slice(ModalSubmitCustomIdPrefix.length);
@@ -60,4 +73,9 @@ export function parseModalSubmitCustomId(customId: string) {
 	}
 
 	return null;
+}
+
+export function parseModalRetryCustomId(customId: string) {
+	if (!customId.startsWith(ModalRetryCustomIdPrefix)) return null;
+	return parseModalSubmitCustomId(`${ModalSubmitCustomIdPrefix}${customId.slice(ModalRetryCustomIdPrefix.length)}`);
 }

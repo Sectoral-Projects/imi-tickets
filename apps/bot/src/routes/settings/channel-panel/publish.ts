@@ -10,7 +10,7 @@ export default class ChannelPanelPublish extends Route {
 		app.post(path, (c) => this.publish(c));
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async publish(c: Context<ApiEnv, string, BlankInput>) {
 		try {
 			const result = await ChannelPanelService.publish();

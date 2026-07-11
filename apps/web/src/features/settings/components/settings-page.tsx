@@ -42,6 +42,12 @@ import {
   StaffRoleAliasesEditor,
   staffRoleAliasesEqual,
 } from "./staff-role-aliases-editor";
+import {
+  DmWordBlacklistEditor,
+  wordFilterRulesEqual,
+} from "./dm-word-blacklist-editor";
+import { UnauthorizedScreen } from "@/components/unauthorized-screen";
+import { ApiError } from "@/lib/api";
 
 type SettingsDraft = {
   settings: AppSettings;
@@ -85,12 +91,12 @@ function SettingSwitchRow({
 
 export function SettingsContent() {
   const session = useAuthGate();
-  const { data, isLoading, error } = useSettings();
-  const channelsQuery = useSettingsChannels(Boolean(data?.primaryGuildId));
-  const rolesQuery = useSettingsRoles(Boolean(data?.primaryGuildId));
-  const templatesQuery = useTemplates();
-  const buttonsQuery = useDmOpenButtons();
-  const channelButtonsQuery = useChannelOpenButtons();
+  const { data, isLoading, error } = useSettings(Boolean(session.data));
+  const channelsQuery = useSettingsChannels(Boolean(data?.primaryGuildId && data?.canAdmin));
+  const rolesQuery = useSettingsRoles(Boolean(data?.primaryGuildId && data?.canAdmin));
+  const templatesQuery = useTemplates(Boolean(data?.canAdmin));
+  const buttonsQuery = useDmOpenButtons(Boolean(data?.canAdmin));
+  const channelButtonsQuery = useChannelOpenButtons(Boolean(data?.canAdmin));
   const updateSettings = useUpdateSettings();
   const updateTemplate = useUpdateTemplate();
   const replaceDmOpenButtons = useReplaceDmOpenButtons();
@@ -110,6 +116,9 @@ export function SettingsContent() {
         ticketOpenButtonMode: normalizeTicketOpenButtonMode(data.settings.ticketOpenButtonMode),
         forwardTemplateButtonsToStaff: data.settings.forwardTemplateButtonsToStaff ?? true,
         staffRoleAliases: data.settings.staffRoleAliases ?? [],
+        commandPrefix: data.settings.commandPrefix ?? ";",
+        privateMessagePrefix: data.settings.privateMessagePrefix ?? "`",
+        dmWordBlacklist: data.settings.dmWordBlacklist ?? [],
       },
       logChannelId: data.logChannelId ?? "",
       transcriptChannelId: data.transcriptChannelId ?? "",
@@ -192,7 +201,14 @@ export function SettingsContent() {
       (draft.settings.ticketChannelNameTemplate ?? "") !==
         (data.settings.ticketChannelNameTemplate ?? "") ||
       Boolean(draft.settings.useChannelNameForTranscript) !==
-        Boolean(data.settings.useChannelNameForTranscript)
+        Boolean(data.settings.useChannelNameForTranscript) ||
+      (draft.settings.commandPrefix ?? ";") !== (data.settings.commandPrefix ?? ";") ||
+      (draft.settings.privateMessagePrefix ?? "`") !==
+        (data.settings.privateMessagePrefix ?? "`") ||
+      !wordFilterRulesEqual(
+        draft.settings.dmWordBlacklist,
+        data.settings.dmWordBlacklist,
+      )
     );
   }, [data, draft]);
 
@@ -237,7 +253,7 @@ export function SettingsContent() {
   };
 
   const handleSave = async () => {
-    if (!draft || !data?.canManage) return;
+    if (!draft || !data?.canAdmin) return;
 
     setSaveError(null);
 
@@ -296,6 +312,36 @@ export function SettingsContent() {
       seenRoleIds.add(roleId);
     }
 
+    const commandPrefix = (draft.settings.commandPrefix ?? ";").trim();
+    const privateMessagePrefix = (draft.settings.privateMessagePrefix ?? "`").trim();
+
+    if (!commandPrefix || !privateMessagePrefix) {
+      setSaveError("Command prefix and private message prefix cannot be empty.");
+      return;
+    }
+
+    if (/\s/.test(commandPrefix) || /\s/.test(privateMessagePrefix)) {
+      setSaveError("Prefixes cannot contain whitespace.");
+      return;
+    }
+
+    if (commandPrefix.length > 5 || privateMessagePrefix.length > 5) {
+      setSaveError("Prefixes must be 5 characters or fewer.");
+      return;
+    }
+
+    if (commandPrefix === privateMessagePrefix) {
+      setSaveError("Command prefix and private message prefix must be different.");
+      return;
+    }
+
+    const dmWordBlacklist = (draft.settings.dmWordBlacklist ?? [])
+      .map((rule) => ({
+        term: rule.term.trim(),
+        match: rule.match === "exact" ? ("exact" as const) : ("keyword" as const),
+      }))
+      .filter((rule) => rule.term.length > 0);
+
     try {
       if (generalDirty) {
         await updateSettings.mutateAsync({
@@ -322,6 +368,9 @@ export function SettingsContent() {
               draft.settings.ticketChannelNameTemplate?.trim() || null,
             useChannelNameForTranscript:
               draft.settings.useChannelNameForTranscript ?? false,
+            commandPrefix,
+            privateMessagePrefix,
+            dmWordBlacklist,
           },
           logChannelId: draft.logChannelId.trim() || null,
           transcriptChannelId: draft.transcriptChannelId.trim() || null,
@@ -390,6 +439,18 @@ export function SettingsContent() {
     return <SettingsPageSkeleton />;
   }
 
+  if (
+    error instanceof ApiError &&
+    (error.code === "FORBIDDEN" || error.status === 403)
+  ) {
+    return (
+      <UnauthorizedScreen
+        title="Admin required"
+        description="You need the Admin permission to view and edit settings."
+      />
+    );
+  }
+
   if (isLoading || !draft) {
     return <SettingsPageSkeleton />;
   }
@@ -402,7 +463,7 @@ export function SettingsContent() {
     );
   }
 
-  const readOnly = !data?.canManage;
+  const readOnly = !data?.canAdmin;
   const adminOnly = !data?.canAdmin;
   const channels = channelsQuery.data?.channels ?? [];
   const channelsLoading = channelsQuery.isLoading;
@@ -421,7 +482,7 @@ export function SettingsContent() {
                 Configure privacy, ticket behavior, and message templates.
               </p>
             </div>
-            {readOnly ? <Badge variant="secondary">Read only</Badge> : null}
+            {readOnly ? <Badge variant="secondary">Admin required to edit</Badge> : null}
           </div>
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
@@ -438,6 +499,57 @@ export function SettingsContent() {
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-4 sm:px-6">
         <TabsContent value="general" className="flex flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Bot prefixes</CardTitle>
+              <CardDescription>
+                Command prefix runs Sapphire and template staff commands. Private
+                message prefix marks staff-only notes in ticket channels. They must
+                differ.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="command-prefix">Command prefix</Label>
+                <Input
+                  id="command-prefix"
+                  value={draft.settings.commandPrefix ?? ";"}
+                  disabled={readOnly || updateSettings.isPending}
+                  maxLength={5}
+                  onChange={(event) => updateSetting("commandPrefix", event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="private-message-prefix">Private message prefix</Label>
+                <Input
+                  id="private-message-prefix"
+                  value={draft.settings.privateMessagePrefix ?? "`"}
+                  disabled={readOnly || updateSettings.isPending}
+                  maxLength={5}
+                  onChange={(event) =>
+                    updateSetting("privateMessagePrefix", event.target.value)
+                  }
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Message filters</CardTitle>
+              <CardDescription>
+                Block member DMs that include restricted terms before they reach staff.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DmWordBlacklistEditor
+                value={draft.settings.dmWordBlacklist ?? []}
+                disabled={readOnly || updateSettings.isPending}
+                onChange={(dmWordBlacklist) => updateSetting("dmWordBlacklist", dmWordBlacklist)}
+              />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Privacy</CardTitle>
@@ -532,7 +644,7 @@ export function SettingsContent() {
               <SettingSwitchRow
                 id="staff-ticket-open-profile"
                 label="Show member profile on ticket open"
-                description="Send a staff-only Component V2 summary before the member's first message in new ticket channels or posts."
+                description="When enabled, posts a staff-only member profile card in the ticket channel and as a System transcript row when a ticket opens or a member is added."
                 checked={draft.settings.staffTicketOpenProfile ?? true}
                 disabled={readOnly || updateSettings.isPending}
                 onCheckedChange={(checked) =>

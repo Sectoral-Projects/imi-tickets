@@ -111,10 +111,11 @@ export abstract class RbacService {
 
 function roleHasPermission(granted: string[], required: RbacPermissionType) {
 	if (granted.includes(RbacPermission.Admin)) return true;
-	if (required === RbacPermission.Admin) return granted.includes(RbacPermission.Admin);
+	if (required === RbacPermission.Admin) return false;
 	if (required === RbacPermission.Manage) {
 		return granted.includes(RbacPermission.Manage);
 	}
+	// READ: granted by READ or MANAGE (ADMIN already returned above)
 	return (
 		granted.includes(RbacPermission.Read) ||
 		granted.includes(RbacPermission.Manage)

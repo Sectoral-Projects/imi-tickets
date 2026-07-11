@@ -15,12 +15,12 @@ export default class ChannelOpenButtons extends Route {
 		app.put(path, (c) => this.replaceButtons(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async listButtons(c: Context<ApiEnv, string, BlankInput>) {
 		return c.json({ buttons: ChannelOpenButtonService.list().map(toButtonView) });
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async replaceButtons(c: Context<ApiEnv, string, BlankInput>) {
 		const body = await c.req.json<{ buttons?: ChannelOpenButtonInput[] }>().catch(() => null);
 		if (!body || !Array.isArray(body.buttons)) {

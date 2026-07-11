@@ -68,7 +68,15 @@ export function parseModalTemplateToBuilder(
 export function buildModalTemplateFromBuilder(state: ModalBuilderState): ModalConfig {
   return {
     title: state.title.trim(),
-    fields: state.fields.map(({ clientKey: _clientKey, ...field }) => field),
+    fields: state.fields.map(({ clientKey: _clientKey, ...field }) => {
+      if (!field.wordFilter) return field;
+      const terms = field.wordFilter.terms.map((term) => term.trim()).filter(Boolean);
+      if (terms.length === 0) {
+        const { wordFilter: _removed, ...rest } = field;
+        return rest;
+      }
+      return { ...field, wordFilter: { ...field.wordFilter, terms } };
+    }),
   };
 }
 

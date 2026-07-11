@@ -1,5 +1,6 @@
 import type { ButtonActionConfig, ModalConfig, ModalFieldConfig, ModalFieldOption } from './types';
 import { ButtonActionType, ModalFieldType } from './types';
+import { normalizeFieldWordFilter } from '@/lib/wordFilter/match';
 
 const FIELD_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
 const MAX_MODAL_FIELDS = 5;
@@ -74,6 +75,9 @@ function normalizeModalField(field: ModalFieldConfig): ModalFieldConfig {
 
 	if (field.required !== undefined) normalized.required = field.required;
 	if (field.placeholder?.trim()) normalized.placeholder = field.placeholder.trim().slice(0, 100);
+
+	const wordFilter = normalizeFieldWordFilter(field.wordFilter);
+	if (wordFilter) normalized.wordFilter = wordFilter;
 
 	if (type === ModalFieldType.Text || type === ModalFieldType.Paragraph) {
 		if (field.minLength !== undefined) normalized.minLength = field.minLength;

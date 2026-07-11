@@ -16,6 +16,7 @@ import {
   MessageReplyLeadingColumn,
   MessageReplySnippet,
 } from "./message-reply-preview";
+import { AuthorHoverCard } from "./author-hover-card";
 import { ForwardedMessageFrame } from "./forwarded-message";
 import { LinkPreviewCard } from "./link-preview-card";
 import {
@@ -27,7 +28,8 @@ import {
 // --- Surface styling ---
 
 const messageRowHighlightClass = "bg-primary/10";
-const messageReplyJumpFlashClass = "animate-reply-jump-highlight";
+const messageReplyJumpFlashClass =
+  "animate-reply-jump-highlight rounded-[inherit]";
 
 function messageRowSurfaceClass({
   highlighted,
@@ -41,7 +43,7 @@ function messageRowSurfaceClass({
   return "hover:bg-muted/40";
 }
 
-export function messageGroupShellClass(groupPos: MessageGroupPos) {
+function messageGroupShellClass(groupPos: MessageGroupPos) {
   switch (groupPos) {
     case "solo":
       return "rounded-xl border border-border bg-card";
@@ -206,7 +208,7 @@ export function MessageTimelineRow({
         <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
           {message.isPrivateStaff ? <PrivateMessageBadge /> : null}
           <Badge
-            variant="secondary"
+            variant={sourceLabel === "DM" ? "secondary" : sourceLabel == "Staff" ? "default" : "outline"}
             className="h-5 px-2 text-[10px] font-semibold tracking-wide uppercase"
           >
             {sourceLabel}
@@ -225,21 +227,25 @@ export function MessageTimelineRow({
           onClick={() => onToggleHighlight(message.id)}
         >
           <MessageReplyLeadingColumn hasReply={Boolean(message.replyTo)}>
-            <Avatar className="h-10 w-10 shrink-0">
-              {!isSystemMessage ? (
-                <AvatarImage
-                  src={
-                    message.author?.avatar
-                      ? `https://cdn.discordapp.com/avatars/${message.author.userId}/${message.author.avatar}.png`
-                      : undefined
-                  }
-                  alt={displayName}
-                />
-              ) : null}
-              <AvatarFallback>
-                {isSystemMessage ? "SY" : displayName.slice(0, 2)}
-              </AvatarFallback>
-            </Avatar>
+            {isSystemMessage ? (
+              <Avatar className="h-10 w-10 shrink-0">
+                <AvatarFallback>SY</AvatarFallback>
+              </Avatar>
+            ) : (
+              <AuthorHoverCard userId={message.authorId}>
+                <Avatar className="h-10 w-10 shrink-0">
+                  <AvatarImage
+                    src={
+                      message.author?.avatar
+                        ? `https://cdn.discordapp.com/avatars/${message.author.userId}/${message.author.avatar}.png`
+                        : undefined
+                    }
+                    alt={displayName}
+                  />
+                  <AvatarFallback>{displayName.slice(0, 2)}</AvatarFallback>
+                </Avatar>
+              </AuthorHoverCard>
+            )}
           </MessageReplyLeadingColumn>
 
           <div className="min-w-0 flex-1">
@@ -251,7 +257,13 @@ export function MessageTimelineRow({
             ) : null}
 
             <div className="flex items-baseline gap-2">
-              <span className="font-medium">{displayName}</span>
+              {isSystemMessage ? (
+                <span className="font-medium">{displayName}</span>
+              ) : (
+                <AuthorHoverCard userId={message.authorId}>
+                  <span className="font-medium">{displayName}</span>
+                </AuthorHoverCard>
+              )}
               <span className="text-xs text-muted-foreground">
                 {new Date(message.createdAt).toLocaleString()}
               </span>

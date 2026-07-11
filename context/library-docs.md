@@ -39,10 +39,17 @@ Do not rely on stale guidance from older context packs. This project does not cu
 
 - Hono is the backend HTTP framework.
 - The server starts through `serve({ fetch: app.fetch, port: 4000 })`.
-- Global CORS allows `http://localhost:5173` with credentials.
+- Global middleware order in `apps/bot/src/lib/client.ts`: `secureHeaders` → CORS → session → `httpRateLimiter` → routes / WebSocket.
+- `secureHeaders` from `hono/secure-headers` runs with `crossOriginResourcePolicy: 'cross-origin'` so the separate SPA origin can read API responses; do not switch back to `same-origin` without checking CORS.
+- HTTP rate limiting uses `hono-rate-limiter` (`rateLimiter`) from `apps/bot/src/lib/api/rate-limit.ts`. Keys prefer authenticated user id, then `x-forwarded-for`, then `getConnInfo` remote address. Skips `OPTIONS` and `/heartbeat`.
+- WebSocket message rate limiting uses `webSocketLimiter` wrapping the `/ws` handler factory inside `upgradeWebSocket` (`apps/bot/src/lib/api/websocket.ts`).
+- Global CORS allows `FRONTEND_URL` (default `http://localhost:5173`) with credentials.
 - Route classes extend `Route` and register handlers in `register(app, path)`.
 - Keep Hono route handlers as HTTP adapters: parse request data, call services, return JSON.
 - Better Auth is mounted through the catch-all route under `/api/auth/*`.
+- Sapphire `defaultPrefix` is `;`; runtime `fetchPrefix` reads `SettingsService.getCommandPrefix()` from app settings (`commandPrefix`). Private staff notes use `privateMessagePrefix` (default `` ` ``). Prefixes must differ.
+- Global `dmWordBlacklist` rejects matching member DMs before record/relay. Shared matcher: `apps/bot/src/lib/wordFilter/match.ts`. Modal fields may set per-field `wordFilter` (blacklist/whitelist); failures reply with Components V2 + Retry (`modal_retry:…`) and do not open tickets or log.
+- `GET /discord/users/:userId` (READ) returns live Discord profile for transcript hover cards.
 
 ## Route Loader
 
@@ -122,6 +129,9 @@ Do not rely on stale guidance from older context packs. This project does not cu
 - Use `useVirtualizer` with `getScrollElement: () => viewportRef.current`, measured variable-height rows through `measureElement`, and stable `getItemKey` values based on timeline item identity.
 - React 19 projects should pass `useFlushSync: false` unless upstream guidance changes.
 - Use `anchorTo: "end"` (chat guide) for prepend/measurement stability. It keeps the visible keyed item stable when older items prepend and compensates above-viewport size deltas, so do NOT hand-roll `scrollTop += heightDiff` restoration. Set `followOnAppend` true only when the view should stick to the newest message (normal mode), false in highlighted-window mode. Pass `scrollEndThreshold` (~80px) so `isAtEnd`/`followOnAppend` tolerate sub-pixel/measurement slack.
+- Dynamic-height backward scrolling uses the TanStack #659 mitigation: a custom `measureElement` returns the existing `itemSizeCache` value while `scrollDirection === "backward"` and otherwise delegates to the library's default measurer. This prevents media/markdown ResizeObserver churn from moving every following absolute row during the gesture.
+- `estimateSize` is message-aware rather than constant: it accounts for group position, text wrapping, replies, reactions, forwarding, files, images, and video embeds using comfortable upper bounds per TanStack guidance. Keep overscan moderate (currently 10); oversized page-wide overscan plus coarse estimates created a large temporary spacer before measurements settled.
+- Timeline pagination completes the message group at each fetched edge before returning: the 30-row base page and each 15-row side of a focused seed can consume up to 30 adjacent extras. The shared contract in `packages/shared/src/timeline.ts` requires same author/channel, chronological timestamps within two minutes, and no reply/private note; audits stop completion. Infinite-query/window pages remain hard visual-group boundaries as a fallback for groups that exceed the cap, so a later prepend/append cannot reshape an existing boundary row and invalidate its cached height.
 - NEVER hand-roll `scrollTop` for a virtualized list. All positioning goes through the virtualizer's own methods (`scrollToEnd`, `scrollToIndex`). Manual `scrollTop = scrollHeight` fights the virtualizer because `scrollHeight` is only the *estimated* `getTotalSize()`; once rows measure real heights the true bottom moves and you end up scrolled up.
 - REQUIRED CSS: put `overflow-anchor: none` (and `overscroll-behavior: contain`) on the scroll viewport (via `ScrollArea`'s `viewportClassName`). Without it the browser's native scroll anchoring fights the virtualizer's `anchorTo` adjustments and causes drift during measurement/prepend and inconsistent centering.
 - Normal-mode initial bottom: call `virtualizer.scrollToEnd()` in a `useLayoutEffect` and keep re-asserting each frame until `scrollHeight - scrollTop - clientHeight <= 1` holds for a few consecutive frames (generous frame budget), then latch a `didInitialScroll` ref. A fixed re-assert count is NOT enough: with `useFlushSync: false` the virtualizer's internal reconcile can declare the scroll stable against the *estimated* total size one frame before the async re-render lands with measured row heights, leaving the view slightly above the true bottom. `anchorTo: "end"` + `followOnAppend` keep it pinned afterward.
@@ -165,6 +175,14 @@ Use semantic token classes from `ui-tokens.md`. Do not hardcode hex values or ra
 
 - Use `lucide-react` for icons in the staff UI.
 - Keep icon sizes consistent with surrounding shadcn primitives, commonly `size-4` or `size-5`.
+
+## Twemoji (`@discordapp/twemoji`)
+
+- Transcript unicode reaction glyphs use Discord's published package `@discordapp/twemoji` (not the stale `twemoji` npm name or newer `@twemoji/api`).
+- Build image URLs with `twemoji.convert.toCodePoint` and `twemoji.base` from that package so assets stay on Discord's pinned `jdecked/twemoji@16.0.1` CDN path (`apps/web/src/lib/twemoji.ts`).
+- Custom Discord emoji (reactions with a snowflake `id`, or `<:name:id>` / `<a:name:id>` in message text) still use `cdn.discordapp.com/emojis/...`.
+- Message bodies render Twemoji via `TwemojiText` in `MessageMarkdown`. Code/pre blocks stay literal. Jumbo sizing applies when `isJumboEmojiMessage` is true (emoji-only content, ≤27 emoji), matching Discord.
+- Twemoji graphics are CC-BY 4.0; a short attribution mention in README/about is enough.
 
 ## Recharts And Resizable Panels
 

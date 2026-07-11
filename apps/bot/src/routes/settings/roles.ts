@@ -11,7 +11,7 @@ export default class SettingsRoles extends Route {
 		app.get(path, (c) => this.getRoles(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async getRoles(c: Context<ApiEnv, string, BlankInput>) {
 		const view = await SettingsService.getView(c.get('user')?.id ?? null);
 		if (!view.primaryGuildId) {

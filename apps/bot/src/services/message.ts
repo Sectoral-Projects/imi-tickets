@@ -1,7 +1,7 @@
 import { attachments, memberSnapshots, messageRevisions, messages } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { MessageReferenceType } from 'discord.js';
+import { MessageReferenceType, MessageType, type Message } from 'discord.js';
 import { AuditAction, AuditService } from './audit';
 import { AutoCloseService } from './autoClose';
 import { MessageRelayService } from './messageRelay';
@@ -231,15 +231,37 @@ export abstract class MessageService {
 		return row.id;
 	}
 
-	static resolveReplyMessageIdFromDiscordMessage(
-		message: { reference?: { messageId?: string | null; type?: MessageReferenceType | null } | null },
+	static getReferencedDiscordMessageId(message: Message): string | undefined {
+		if (message.reference?.type === MessageReferenceType.Forward) return undefined;
+		const messageId = message.reference?.messageId?.trim();
+		return messageId || undefined;
+	}
+
+	/**
+	 * Hydrates reply metadata when the gateway omits `reference.messageId`, then
+	 * maps it to the stored logical message id for this thread.
+	 */
+	static async resolveReplyMessageIdFromDiscordMessage(
+		message: Message,
 		threadId: number,
 		db: DbClient = container.sqlite
-	) {
-		if (!message.reference?.messageId) return undefined;
-		if (message.reference.type === MessageReferenceType.Forward) return undefined;
+	): Promise<number | undefined> {
+		if (message.reference?.type === MessageReferenceType.Forward) return undefined;
 
-		return this.resolveReplyMessageId(message.reference.messageId, threadId, db);
+		let referencedDiscordId = this.getReferencedDiscordMessageId(message);
+		const looksLikeReply = message.type === MessageType.Reply || message.reference != null;
+
+		if (!referencedDiscordId && looksLikeReply) {
+			const fetched = await message.fetch().catch(() => message);
+			referencedDiscordId = this.getReferencedDiscordMessageId(fetched);
+
+			if (!referencedDiscordId) {
+				const referenced = await fetched.fetchReference().catch(() => null);
+				referencedDiscordId = referenced?.id;
+			}
+		}
+
+		return this.resolveReplyMessageId(referencedDiscordId, threadId, db);
 	}
 
 	/**

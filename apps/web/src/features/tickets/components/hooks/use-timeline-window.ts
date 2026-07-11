@@ -4,10 +4,12 @@ import {
   type TimelineWindowDirection,
 } from "../../api/timeline";
 import type { TimelineItem } from "../../schemas/timeline";
+import { timelineItemKey } from "../../utils/timeline/blocks";
 
 export type TimelineWindowState = {
   anchorMessageId: number;
   items: TimelineItem[];
+  groupBreakBeforeKeys: string[];
   previousCursor: string | null;
   nextCursor: string | null;
 };
@@ -77,6 +79,7 @@ export function useTimelineWindow(options: UseTimelineWindowOptions) {
         setWindowState({
           anchorMessageId: messageId,
           items: result.items,
+          groupBreakBeforeKeys: [],
           previousCursor: result.previousCursor,
           nextCursor: result.nextCursor,
         });
@@ -117,12 +120,23 @@ export function useTimelineWindow(options: UseTimelineWindowOptions) {
         setWindowState((current) => {
           if (!current) return current;
 
+          const boundaryItem =
+            direction === "older" ? current.items[0] : result.items[0];
+          const boundaryKey = boundaryItem
+            ? timelineItemKey(boundaryItem)
+            : null;
+
           return {
             ...current,
             items:
               direction === "older"
                 ? [...result.items, ...current.items]
                 : [...current.items, ...result.items],
+            groupBreakBeforeKeys:
+              boundaryKey &&
+              !current.groupBreakBeforeKeys.includes(boundaryKey)
+                ? [...current.groupBreakBeforeKeys, boundaryKey]
+                : current.groupBreakBeforeKeys,
             previousCursor:
               direction === "older"
                 ? result.previousCursor

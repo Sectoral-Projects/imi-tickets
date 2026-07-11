@@ -164,7 +164,7 @@ export function resolveReactionMirrorTargetsFromPacket(
 	return MessageService.resolveRelayReactionTargets(discordMessageId, channelId, thread);
 }
 
-/** Best-effort fetch of the Discord message that was reacted to (for mirror-remove). */
+/** Best-effort fetch of the Discord message that was reacted to (cache warming). */
 export async function fetchReactionSourceMessage(channelId: string, messageId: string) {
 	const channel = await container.client.channels.fetch(channelId).catch(() => null);
 	if (!channel?.isTextBased()) return null;

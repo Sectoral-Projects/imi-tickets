@@ -13,6 +13,7 @@ import { TicketOpenPrompt } from './ticketOpenPrompt';
 import { ChannelTicketPanelAck } from './channelTicketPanelAck';
 import { TicketChannelPanel } from './ticketChannelPanel';
 import { Transcript } from './transcript';
+import { ticketAppUrl } from '@/lib/discord/userDisplay';
 import type { APIMessageTopLevelComponent } from 'discord.js';
 import {
 	mergeGlobalTemplateVariables,
@@ -91,9 +92,10 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 	}),
 	defineSystemComponent(StaffTicketOpenProfile, {
 		name: 'Staff ticket open profile',
-		description: 'Staff-only profile shown before the first member message when a ticket opens.',
+		description: 'Staff-only profile shown in the ticket channel and transcript when a member is added.',
 		category: 'tickets',
 		variables: [
+			'heading',
 			'userMention',
 			'accountCreatedAt',
 			'joinedMainGuildAt',
@@ -103,6 +105,7 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 			'mutualServers'
 		],
 		sampleVariables: {
+			heading: 'Ticket opened by <@123>',
 			userMention: '<@123>',
 			accountCreatedAt: '<t:0:F>',
 			joinedMainGuildAt: '<t:0:F>',
@@ -113,6 +116,7 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 		},
 		renderDefault: () =>
 			StaffTicketOpenProfile.render({
+				heading: 'Ticket opened by <@123>',
 				userMention: '<@123>',
 				accountCreatedAt: '<t:0:F>',
 				joinedMainGuildAt: '<t:0:F>',
@@ -164,10 +168,10 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 		sampleVariables: {
 			userLine: 'User (123)',
 			ticketId: '1',
-			ticketUrl: 'http://localhost:5173/1'
+			ticketUrl: ticketAppUrl(1)
 		},
 		renderDefault: () =>
-			Transcript.render({ userLine: 'User (123)', ticketId: '1', ticketUrl: 'http://localhost:5173/1' })
+			Transcript.render({ userLine: 'User (123)', ticketId: '1', ticketUrl: ticketAppUrl(1) })
 	}),
 	defineSystemComponent(AuditLog, {
 		name: 'Audit log',

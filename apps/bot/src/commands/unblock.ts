@@ -28,7 +28,7 @@ export class UnblockCommand extends Command {
 	}
 
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
-		if (!(await requireGuildPermission(interaction, RbacPermission.Manage))) {
+		if (!(await requireGuildPermission(interaction, RbacPermission.Admin))) {
 			return replyComponents(interaction, textComponent('Unblock', ['You do not have permission to unblock users or roles.']));
 		}
 
@@ -49,7 +49,7 @@ export class UnblockCommand extends Command {
 	}
 
 	public override async messageRun(message: Message, _args: Args) {
-		if (!(await requireGuildPermission(message, RbacPermission.Manage))) {
+		if (!(await requireGuildPermission(message, RbacPermission.Admin))) {
 			return replyComponents(message, textComponent('Unblock', ['You do not have permission to unblock users or roles.']));
 		}
 

@@ -11,13 +11,13 @@ export default class Templates extends Route {
 		app.post(path, (c) => this.createTemplate(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async listTemplates(c: Context<ApiEnv, string, BlankInput>) {
 		const search = c.req.query('search')?.trim();
 		return c.json({ templates: MessageTemplateService.list({ search }) });
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async createTemplate(c: Context<ApiEnv, string, BlankInput>) {
 		const body = await c.req.json<SaveMessageTemplateInput>().catch(() => null);
 		if (!body) return c.json({ error: 'Invalid JSON body' }, 400);

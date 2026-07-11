@@ -246,6 +246,121 @@ export function ModalBuilder({
                   onCheckedChange={(required) => updateField(index, { required })}
                 />
               </div>
+
+              {field.type === "text" || field.type === "paragraph" ? (
+                <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-sm">Word filter</Label>
+                    <Select
+                      value={field.wordFilter?.mode ?? "off"}
+                      disabled={disabled}
+                      onValueChange={(mode) => {
+                        if (mode === "off" || mode == null) {
+                          updateField(index, { wordFilter: undefined });
+                          return;
+                        }
+                        if (mode !== "blacklist" && mode !== "whitelist") return;
+                        updateField(index, {
+                          wordFilter: {
+                            mode,
+                            match: field.wordFilter?.match ?? "keyword",
+                            terms: field.wordFilter?.terms?.length
+                              ? field.wordFilter.terms
+                              : [""],
+                          },
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="off">Off</SelectItem>
+                        <SelectItem value="blacklist">Blacklist</SelectItem>
+                        <SelectItem value="whitelist">Whitelist</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {field.wordFilter ? (
+                    <>
+                      <Select
+                        value={field.wordFilter.match}
+                        disabled={disabled}
+                        onValueChange={(match) => {
+                          if (match !== "keyword" && match !== "exact") return;
+                          updateField(index, {
+                            wordFilter: { ...field.wordFilter!, match },
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="keyword">Keyword</SelectItem>
+                          <SelectItem value="exact">Exact</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <div className="flex flex-col gap-2">
+                        {field.wordFilter.terms.map((term, termIndex) => (
+                          <div key={termIndex} className="flex gap-2">
+                            <Input
+                              value={term}
+                              disabled={disabled}
+                              placeholder="Term or URL host"
+                              onChange={(event) => {
+                                const terms = [...field.wordFilter!.terms];
+                                terms[termIndex] = event.target.value;
+                                updateField(index, {
+                                  wordFilter: { ...field.wordFilter!, terms },
+                                });
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={disabled}
+                              onClick={() => {
+                                const terms = field.wordFilter!.terms.filter(
+                                  (_t, i) => i !== termIndex,
+                                );
+                                updateField(index, {
+                                  wordFilter:
+                                    terms.length > 0
+                                      ? { ...field.wordFilter!, terms }
+                                      : undefined,
+                                });
+                              }}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        ))}
+                        {!disabled && (field.wordFilter.terms.length ?? 0) < 100 ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              updateField(index, {
+                                wordFilter: {
+                                  ...field.wordFilter!,
+                                  terms: [...field.wordFilter!.terms, ""],
+                                },
+                              })
+                            }
+                          >
+                            <Plus data-icon="inline-start" />
+                            Add term
+                          </Button>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

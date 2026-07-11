@@ -187,6 +187,8 @@ export default class Tickets extends Route {
 | `GET /settings` | Requires product `READ`; unfinished and returns 501 |
 | `GET|POST /api/auth/*` | Better Auth handler |
 
+Timeline pages use a base size of 30 (or 15 on each side of a focused `messageId` seed) and may include up to 30 additional rows at each response edge to finish an adjacent visual message group. Group membership is defined in `packages/shared`: messages must share author and channel, be chronological and at most two minutes apart, and neither may be a reply or private staff note. Cursors always advance from the actual extended edge; audits and non-groupable messages stop extension immediately.
+
 API success responses are plain JSON. Errors use `{ error: string }`, with product authorization adding `code: "ONBOARDING_REQUIRED"` or `code: "FORBIDDEN"` for 403 responses.
 
 ## Service And Database Pattern
@@ -212,9 +214,19 @@ Better Auth is configured in `apps/bot/src/lib/auth.ts` with:
 - `baseURL: "http://localhost:4000"`.
 - `trustedOrigins: ["http://localhost:5173"]`.
 
-Hono CORS in `src/lib/client.ts` allows `http://localhost:5173` with credentials. Browser API calls that require session cookies should include credentials in the shared fetch wrapper.
+Hono CORS in `src/lib/client.ts` allows `FRONTEND_URL` (default `http://localhost:5173`) with credentials. Browser API calls that require session cookies should include credentials in the shared fetch wrapper.
+
+API security middleware (same file): `secureHeaders` (with `crossOriginResourcePolicy: 'cross-origin'` for the SPA), then CORS, session, then `hono-rate-limiter` HTTP limits. `/ws` also wraps handlers with `webSocketLimiter` for inbound message floods. Details live in `lib/api/rate-limit.ts` and `context/library-docs.md`.
 
 `src/lib/client.ts` also loads the Better Auth session into Hono context as `user` and `session` for route guards.
+
+Bot command and private-message prefixes live in `config.settings` (`commandPrefix`, `privateMessagePrefix`). Member DM ingress applies `dmWordBlacklist` before ticket open/relay. Modal text fields may carry `wordFilter` rules validated on submit.
+
+Message reactions are stored per human on the logical transcript message. Discord only mirrors one bot reaction per emoji onto each linked copy, so mirror removal must wait until the logical message has zero remaining human reactors for that emoji — not until the single Discord message that just lost a reaction is empty. Otherwise one participant clearing their reaction would wipe the staff/DM mirrors while others still have it.
+
+Message group headers in the staff UI show historical `member_snapshots`. Hovering the author loads current Discord identity (and primary-guild roles when resolvable) from `GET /discord/users/:userId` (5-minute TanStack Query cache).
+
+When `staffTicketOpenProfile` is enabled, the staff open-profile card is posted only in the staff channel/post and recorded as a System transcript row (human-readable display names and role names; user names link to Discord profiles for hover cards in the web UI). The `add` / `remove` / `participants` staff commands manage and inspect ticket participants; each successful `add` posts the same profile card (staff + transcript only). Staff who send a message or run a staff command in the ticket channel/post are recorded as `role=staff` participants (independent of `role=user` member rows — the same Discord user can appear in both). The `participants` command also backfills staff from prior staff-channel message authors.
 
 ## Custom RBAC
 

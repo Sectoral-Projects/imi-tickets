@@ -1,11 +1,19 @@
-/** Leading single backtick — not `` or ``` (code fences). */
-const PRIVATE_PREFIX = /^`(?!`)/;
+import { SettingsService } from '@/services/settings';
 
-/** Staff-only note in a ticket channel/post; must not relay to the member. */
+function escapeRegExp(value: string) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function privatePrefixPattern() {
+	const prefix = SettingsService.getPrivateMessagePrefix();
+	return new RegExp(`^${escapeRegExp(prefix)}`);
+}
+
+/** Staff-only note in a ticket channel/post; must not relay to the member. Also persisted via NoteService. */
 export function isPrivateStaffMessage(content: string) {
-	return PRIVATE_PREFIX.test(content);
+	return privatePrefixPattern().test(content);
 }
 
 export function stripPrivateStaffPrefix(content: string) {
-	return content.replace(PRIVATE_PREFIX, '');
+	return content.replace(privatePrefixPattern(), '');
 }

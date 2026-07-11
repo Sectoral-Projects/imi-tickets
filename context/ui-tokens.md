@@ -70,6 +70,7 @@ className="bg-[#ffffff]"
 - Sidebar-ready tokens: `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-border`, `sidebar-ring`.
 - Radius scale: `radius-sm` through `radius-4xl`.
 - Discord template preview: `discord-preview-canvas`, `discord-preview-surface`, `discord-preview-foreground`, `discord-preview-muted`, `discord-preview-timestamp` (used only in the template builder preview panel).
+- Reply jump flash: `reply-jump` (amber highlight when clicking a reply snippet in the transcript).
 - Fonts: `font-sans` uses Inter Variable; `font-heading` uses Roboto Variable.
 
 ## Preferred Classes

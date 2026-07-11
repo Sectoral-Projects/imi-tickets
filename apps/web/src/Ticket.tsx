@@ -1,5 +1,7 @@
 import { TicketContent } from "@/features/tickets/components/ticket";
+import { useParams } from "react-router";
 
 export default function Ticket() {
-  return <TicketContent />;
+  const { ticketId } = useParams();
+  return <TicketContent key={ticketId} />;
 }

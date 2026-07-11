@@ -2,6 +2,7 @@ import { Component } from './util/component';
 import { APIMessageTopLevelComponent, Colors, ComponentType } from 'discord.js';
 
 export type StaffTicketOpenProfileVars = {
+	heading: string;
 	userMention: string;
 	accountCreatedAt: string;
 	joinedMainGuildAt: string;
@@ -21,7 +22,7 @@ export class StaffTicketOpenProfileComponent extends Component<StaffTicketOpenPr
 			components: [
 				{
 					type: ComponentType.TextDisplay,
-					content: '# Ticket opened by {{userMention}}'
+					content: '# {{heading}}'
 				},
 				{
 					type: ComponentType.TextDisplay,

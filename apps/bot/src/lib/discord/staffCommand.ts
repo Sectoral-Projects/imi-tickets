@@ -1,4 +1,5 @@
 import { RbacPermission, RbacService, type RbacPermissionType } from '@/services/rbac';
+import { TicketParticipantService } from '@/services/ticketParticipant';
 import { container } from '@sapphire/framework';
 import {
 	ComponentType,
@@ -24,29 +25,39 @@ export function formatCommandError(error: unknown, fallback = 'Something went wr
 	return fallback;
 }
 
-export async function requireGuildPermission(target: CommandTarget, permission: RbacPermissionType = RbacPermission.Read) {
+function noteStaffJoinedFromCommandTarget(target: CommandTarget) {
+	const userId = 'author' in target ? target.author.id : target.user.id;
+	const channelId = target.channelId ?? ('channel' in target ? target.channel?.id : null);
+	TicketParticipantService.noteStaffActivityInChannel(channelId, userId);
+}
+
+export async function requireGuildPermission(target: CommandTarget, permission: RbacPermissionType = RbacPermission.Manage) {
 	try {
 		const guildId = target.guildId;
 		const userId = 'author' in target ? target.author.id : target.user.id;
 		if (!guildId) return false;
 
+		let allowed = false;
+
 		if ('memberPermissions' in target && target.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-			return RbacService.hasGuildPermission(userId, guildId, permission, undefined, {
+			allowed = await RbacService.hasGuildPermission(userId, guildId, permission, undefined, {
 				administrator: true
 			});
-		}
-
-		if ('member' in target && target.member instanceof GuildMember) {
-			return RbacService.hasGuildPermission(userId, guildId, permission, undefined, { member: target.member });
-		}
-
-		if ('member' in target && target.member && 'roles' in target.member && Array.isArray(target.member.roles)) {
-			return RbacService.hasGuildPermission(userId, guildId, permission, undefined, {
+		} else if ('member' in target && target.member instanceof GuildMember) {
+			allowed = await RbacService.hasGuildPermission(userId, guildId, permission, undefined, { member: target.member });
+		} else if ('member' in target && target.member && 'roles' in target.member && Array.isArray(target.member.roles)) {
+			allowed = await RbacService.hasGuildPermission(userId, guildId, permission, undefined, {
 				roleIds: [...target.member.roles]
 			});
+		} else {
+			allowed = await RbacService.hasGuildPermission(userId, guildId, permission);
 		}
 
-		return RbacService.hasGuildPermission(userId, guildId, permission);
+		if (allowed) {
+			noteStaffJoinedFromCommandTarget(target);
+		}
+
+		return allowed;
 	} catch (error) {
 		container.logger.warn('Failed to resolve guild permission for staff command', error);
 		return false;

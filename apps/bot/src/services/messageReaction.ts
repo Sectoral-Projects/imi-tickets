@@ -114,6 +114,23 @@ export abstract class MessageReactionService {
 		return result.changes > 0;
 	}
 
+	/** True when at least one human still has this emoji on the logical message. */
+	static hasRemainingReactors(
+		messageId: number,
+		emoji: Emoji | APIEmoji | StoredReactionEmoji,
+		db: DbClient = container.sqlite
+	) {
+		const key = reactionEmojiKey(normalizeEmoji(emoji));
+		const row = db
+			.select({ userId: messageReactions.userId })
+			.from(messageReactions)
+			.where(and(eq(messageReactions.messageId, messageId), eq(messageReactions.emojiKey, key)))
+			.limit(1)
+			.get();
+
+		return Boolean(row);
+	}
+
 	/**
 	 * Upsert every non-bot reactor found on any linked Discord copy.
 	 * Never deletes — event-sourced removes own that. This heals missed events

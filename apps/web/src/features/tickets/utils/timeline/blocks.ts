@@ -1,8 +1,7 @@
 import type { EnrichedMessage } from "../../schemas/messages";
 import type { TimelineItem } from "../../schemas/timeline";
+import { canGroupAdjacentMessages } from "@imi/tickets-shared";
 import { formatAuditLabel } from "./audit";
-
-const CHAIN_TIME_MS = 2 * 60 * 1000;
 
 export type TimelineMessageBlock = {
   kind: "messages";
@@ -34,21 +33,42 @@ export type FlattenedTimelineRow =
       createdAt: string;
     };
 
+export function timelineItemKey(item: TimelineItem) {
+  return item.kind === "message"
+    ? `message-${item.message.id}`
+    : `audit-${item.audit.id}`;
+}
+
 function messageHasReply(message: EnrichedMessage) {
   return Boolean(message.replyTo ?? message.replyToMessageId);
 }
 
+function messageIsPrivateStaff(message: EnrichedMessage) {
+  return Boolean(message.isPrivateStaff);
+}
+
+/** Replies and private staff notes always start their own visual group. */
+function messageStartsNewGroup(message: EnrichedMessage) {
+  return messageHasReply(message) || messageIsPrivateStaff(message);
+}
+
 function canChain(previous: EnrichedMessage, next: EnrichedMessage) {
-  if (messageHasReply(next) || messageHasReply(previous)) return false;
-
-  const sameAuthor = previous.authorId === next.authorId;
-  const sameChannel = previous.channelId === next.channelId;
-  const withinWindow =
-    new Date(next.createdAt).getTime() -
-      new Date(previous.createdAt).getTime() <=
-    CHAIN_TIME_MS;
-
-  return sameAuthor && sameChannel && withinWindow;
+  return canGroupAdjacentMessages(
+    {
+      authorId: previous.authorId,
+      channelId: previous.channelId,
+      createdAt: previous.createdAt,
+      isPrivateStaff: previous.isPrivateStaff,
+      hasReply: messageHasReply(previous),
+    },
+    {
+      authorId: next.authorId,
+      channelId: next.channelId,
+      createdAt: next.createdAt,
+      isPrivateStaff: next.isPrivateStaff,
+      hasReply: messageHasReply(next),
+    },
+  );
 }
 
 function pinThreadOpenedMarker(items: readonly TimelineItem[]): TimelineItem[] {
@@ -73,7 +93,10 @@ function pinThreadOpenedMarker(items: readonly TimelineItem[]): TimelineItem[] {
   ];
 }
 
-export function buildTimelineBlocks(items: readonly TimelineItem[]): TimelineBlock[] {
+export function buildTimelineBlocks(
+  items: readonly TimelineItem[],
+  breakBeforeKeys: ReadonlySet<string> = new Set(),
+): TimelineBlock[] {
   const orderedItems = pinThreadOpenedMarker(items);
   const blocks: TimelineBlock[] = [];
   let currentGroup: EnrichedMessage[] = [];
@@ -85,6 +108,13 @@ export function buildTimelineBlocks(items: readonly TimelineItem[]): TimelineBlo
   };
 
   for (const item of orderedItems) {
+    // Pages are loaded independently. Never let a newly prepended/appended page
+    // reshape the group chrome (and therefore measured height) of an existing
+    // boundary row.
+    if (breakBeforeKeys.has(timelineItemKey(item))) {
+      flushGroup();
+    }
+
     if (item.kind === "audit") {
       flushGroup();
       blocks.push({
@@ -98,7 +128,7 @@ export function buildTimelineBlocks(items: readonly TimelineItem[]): TimelineBlo
 
     const message = item.message;
 
-    if (messageHasReply(message)) {
+    if (messageStartsNewGroup(message)) {
       flushGroup();
       blocks.push({ kind: "messages", messages: [message] });
       continue;

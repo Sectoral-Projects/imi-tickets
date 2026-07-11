@@ -2,10 +2,15 @@ import { replyBlocked } from '@/lib/discord/blockedReply';
 import { parseStaffPageCustomId, StaffPageButtonPrefix } from '@/lib/discord/staffPagination';
 import { canUseStaffPagination, renderStaffPage } from '@/lib/discord/staffPaginationPages';
 import {
+	buildChannelOpenModalRetryCustomId,
 	buildChannelOpenModalSubmitCustomId,
+	buildDmOpenModalRetryCustomId,
 	buildDmOpenModalSubmitCustomId,
+	buildEmbeddedModalRetryCustomId,
 	buildEmbeddedModalSubmitCustomId,
+	ModalRetryCustomIdPrefix,
 	parseEmbeddedModalButtonCustomId,
+	parseModalRetryCustomId,
 	parseModalSubmitCustomId,
 	TemplateModalButtonCustomIdPrefix
 } from '@/lib/buttonActions/customIds';
@@ -13,6 +18,11 @@ import { replyChannelPanelTicketAck } from '@/lib/discord/channelPanelAck';
 import { buildDiscordModal } from '@/lib/buttonActions/modalBuilder';
 import { extractModalTemplateVariables } from '@/lib/buttonActions/modalValues';
 import { ButtonActionType } from '@/lib/buttonActions/types';
+import {
+	replyModalWordFilterReject,
+	showModalRetryError,
+	validateModalFieldsAgainstWordFilters
+} from '@/lib/wordFilter/replies';
 import { BlockService } from '@/services/block';
 import { ButtonActionService } from '@/services/buttonAction';
 import { ChannelButtonCustomIdPrefix, ChannelOpenButtonService } from '@/services/channelOpenButton';
@@ -47,6 +57,11 @@ export class InteractionCreateListener extends Listener {
 		}
 
 		if (!interaction.isButton()) return;
+
+		if (interaction.customId.startsWith(ModalRetryCustomIdPrefix)) {
+			await this.handleModalRetry(interaction);
+			return;
+		}
 
 		if (interaction.customId.startsWith(StaffPageButtonPrefix)) {
 			await this.handleStaffPageButton(interaction);
@@ -370,6 +385,15 @@ export class InteractionCreateListener extends Listener {
 		}
 
 		const modalVars = extractModalTemplateVariables(modalConfig.fields, interaction);
+		const filterResult = validateModalFieldsAgainstWordFilters(modalConfig.fields, modalVars);
+		if (!filterResult.ok) {
+			await replyModalWordFilterReject(interaction, {
+				...filterResult,
+				retryCustomId: buildDmOpenModalRetryCustomId(buttonId)
+			});
+			return;
+		}
+
 		const settings = SettingsService.getAppSettings();
 		const openResult = await TicketOpenService.openFromContent({
 			user: interaction.user,
@@ -436,6 +460,15 @@ export class InteractionCreateListener extends Listener {
 		}
 
 		const modalVars = extractModalTemplateVariables(modalConfig.fields, interaction);
+		const filterResult = validateModalFieldsAgainstWordFilters(modalConfig.fields, modalVars);
+		if (!filterResult.ok) {
+			await replyModalWordFilterReject(interaction, {
+				...filterResult,
+				retryCustomId: buildChannelOpenModalRetryCustomId(buttonId)
+			});
+			return;
+		}
+
 		await completeChannelPanelTicketOpen(interaction, interaction.user, button, modalVars, {
 			modalResponse: true
 		});
@@ -457,6 +490,15 @@ export class InteractionCreateListener extends Listener {
 		}
 
 		const modalVars = extractModalTemplateVariables(modalConfig.fields, interaction);
+		const filterResult = validateModalFieldsAgainstWordFilters(modalConfig.fields, modalVars);
+		if (!filterResult.ok) {
+			await replyModalWordFilterReject(interaction, {
+				...filterResult,
+				retryCustomId: buildEmbeddedModalRetryCustomId(templateId, buttonId)
+			});
+			return;
+		}
+
 		const settings = SettingsService.getAppSettings();
 		const thread = TicketService.findOpenThreadForUser(interaction.user.id);
 
@@ -468,6 +510,81 @@ export class InteractionCreateListener extends Listener {
 			settings,
 			thread?.channelId,
 			true
+		);
+	}
+
+	private async handleModalRetry(interaction: ButtonInteraction) {
+		const parsed = parseModalRetryCustomId(interaction.customId);
+		if (!parsed) {
+			await showModalRetryError(interaction, 'That retry control is no longer valid.');
+			return;
+		}
+
+		if (parsed.kind === 'dm') {
+			const pending = PendingTicketService.find(interaction.user.id);
+			if (!pending) {
+				await showModalRetryError(
+					interaction,
+					'That ticket request expired. Send a new message to start again.'
+				);
+				return;
+			}
+
+			const button = DmOpenButtonService.find(parsed.buttonId);
+			const modalConfig = ButtonActionService.resolveModal(
+				button
+					? {
+							actionType: ButtonActionType.Modal,
+							templateId: button.templateId.trim() || undefined,
+							modalTemplateId: button.modalTemplateId?.trim() || undefined,
+							modal: button.modalConfig ?? undefined
+						}
+					: null
+			);
+			if (!button?.enabled || button.actionType !== ButtonActionType.Modal || !modalConfig) {
+				await showModalRetryError(
+					interaction,
+					'That option is no longer available. Send a new message to start again.'
+				);
+				return;
+			}
+
+			await interaction.showModal(buildDiscordModal(buildDmOpenModalSubmitCustomId(parsed.buttonId), modalConfig));
+			return;
+		}
+
+		if (parsed.kind === 'channel') {
+			const button = ChannelOpenButtonService.find(parsed.buttonId);
+			const modalConfig = ButtonActionService.resolveModal(
+				button
+					? {
+							actionType: ButtonActionType.Modal,
+							templateId: button.templateId.trim() || undefined,
+							modalTemplateId: button.modalTemplateId?.trim() || undefined,
+							modal: button.modalConfig ?? undefined
+						}
+					: null
+			);
+			if (!button?.enabled || button.actionType !== ButtonActionType.Modal || !modalConfig) {
+				await showModalRetryError(interaction, 'That option is no longer available.');
+				return;
+			}
+
+			await interaction.showModal(
+				buildDiscordModal(buildChannelOpenModalSubmitCustomId(parsed.buttonId), modalConfig)
+			);
+			return;
+		}
+
+		const action = ButtonActionService.getEmbedded(parsed.templateId, parsed.buttonId);
+		const modalConfig = ButtonActionService.resolveModal(action);
+		if (action?.actionType !== ButtonActionType.Modal || !modalConfig) {
+			await showModalRetryError(interaction, 'That option is no longer available.');
+			return;
+		}
+
+		await interaction.showModal(
+			buildDiscordModal(buildEmbeddedModalSubmitCustomId(parsed.templateId, parsed.buttonId), modalConfig)
 		);
 	}
 

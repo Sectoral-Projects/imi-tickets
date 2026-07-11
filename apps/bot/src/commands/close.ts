@@ -2,6 +2,7 @@ import { Closed } from '@/lib/components/closed';
 import { NotFound } from '@/lib/components/notFound';
 import { RbacPermission, RbacService } from '@/services/rbac';
 import { TicketCloseService } from '@/services/ticketClose';
+import { TicketParticipantService } from '@/services/ticketParticipant';
 import { TicketService } from '@/services/ticket';
 import { ApplyOptions } from '@sapphire/decorators';
 import { Args, Command } from '@sapphire/framework';
@@ -115,6 +116,8 @@ export class UserCloseCommand extends Command {
 			return;
 		}
 
+		TicketParticipantService.noteStaffActivityInChannel(message.channel.id, message.author.id);
+
 		await message.reply({
 			content: reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.'
 		});
@@ -147,6 +150,8 @@ export class UserCloseCommand extends Command {
 			await interaction.editReply({ content: 'You do not have permission to close tickets.' });
 			return;
 		}
+
+		TicketParticipantService.noteStaffActivityInChannel(interaction.channel.id, interaction.user.id);
 
 		await interaction.editReply({
 			content: reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.'

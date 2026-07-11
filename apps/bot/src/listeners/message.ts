@@ -15,12 +15,16 @@ import { DmButtonCustomIdPrefix, DmOpenButtonService } from '@/services/dmOpenBu
 import { MessageRelayService } from '@/services/messageRelay';
 import { MemberSnapshotService } from '@/services/snapshot';
 import { MessageService } from '@/services/message';
+import { NoteService } from '@/services/note';
 import { PendingTicketService } from '@/services/pendingTicket';
 import { SettingsService, TicketOpenButtonMode } from '@/services/settings';
 import { TicketChannelService } from '@/services/ticketChannel';
 import { TicketOpenService } from '@/services/ticketOpen';
+import { TicketParticipantService } from '@/services/ticketParticipant';
 import { TicketService } from '@/services/ticket';
 import { StaffTemplateCommandService } from '@/services/staffTemplateCommand';
+import { findBlacklistHit } from '@/lib/wordFilter/match';
+import { replyDmWordBlacklist } from '@/lib/wordFilter/replies';
 import { ApplyOptions } from '@sapphire/decorators';
 import { Events, Listener, container } from '@sapphire/framework';
 import { ChannelType, Message, MessageFlags } from 'discord.js';
@@ -77,6 +81,8 @@ export class MessageEvent extends Listener {
 			return;
 		}
 
+		if (await this.rejectDmWordBlacklist(message)) return;
+
 		const openThread = TicketService.findOpenThreadForUser(message.author.id);
 
 		if (openThread) {
@@ -98,6 +104,17 @@ export class MessageEvent extends Listener {
 		await this.handleNewThreadRequest(message);
 	}
 
+	private async rejectDmWordBlacklist(message: Message) {
+		const rules = SettingsService.getAppSettings().dmWordBlacklist ?? [];
+		const hit = findBlacklistHit(message.content ?? '', rules);
+		if (!hit) return false;
+
+		await replyDmWordBlacklist(message, hit).catch((error) => {
+			container.logger.warn('Failed to send DM word blacklist rejection', error);
+		});
+		return true;
+	}
+
 	private async handleGuildTicketMessage(message: Message) {
 		const thread = TicketService.findOpenByStaffChannelId(message.channel.id);
 		if (!thread) return;
@@ -109,6 +126,8 @@ export class MessageEvent extends Listener {
 
 		const shouldRelay = await shouldRelayStaffTicketActivity(message.author.id, thread.userId, message.guildId);
 		if (!shouldRelay) return;
+
+		TicketParticipantService.noteStaffActivityInChannel(message.channel.id, message.author.id);
 
 		if (isPrivateStaffMessage(message.content)) {
 			await this.acknowledgePrivateStaffMessage(message);
@@ -197,6 +216,7 @@ export class MessageEvent extends Listener {
 		const fallbackText =
 			relayContent.media.length > 0 || relayContent.linkPreviews.length > 0 ? '' : '(no message content)';
 		const storedContent = content ?? (relayContent.text.trim() || fallbackText);
+		const replyToMessageId = await MessageService.resolveReplyMessageIdFromDiscordMessage(message, threadId);
 
 		const created = MessageService.create({
 			threadId,
@@ -208,8 +228,16 @@ export class MessageEvent extends Listener {
 			content: storedContent,
 			isForwarded: relayContent.isForwarded,
 			isPrivateStaff: options?.isPrivateStaff ?? false,
-			replyToMessageId: MessageService.resolveReplyMessageIdFromDiscordMessage(message, threadId)
+			replyToMessageId
 		});
+
+		if (options?.isPrivateStaff) {
+			NoteService.create({
+				threadId,
+				authorId: message.author.id,
+				content: storedContent
+			});
+		}
 
 		if (relayRecords) {
 			for (const relay of relayRecords) {

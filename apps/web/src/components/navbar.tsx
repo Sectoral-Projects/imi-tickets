@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { NavbarSkeleton } from "@/components/navbar-skeleton";
 import { Menu, LogOut } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/toggle";
+import { useClientPreferences } from "@/features/settings/hooks/settings";
 
 interface MenuItem {
   title: string;
@@ -40,23 +41,10 @@ interface MenuItem {
 }
 
 interface NavbarProps {
-  logo: {
-    url: string;
-    src: string;
-    alt: string;
-    title: string;
-    className?: string;
-  };
   menu?: MenuItem[];
 }
 
 const data: NavbarProps = {
-  logo: {
-    url: "http://localhost:5173",
-    src: logo,
-    alt: "logo",
-    title: "imi/tickets",
-  },
   menu: [
     { title: "Tickets", url: "/" },
     {
@@ -66,12 +54,16 @@ const data: NavbarProps = {
     {
       title: "Settings",
       url: "/settings",
-    }
-  ]
+    },
+  ],
 };
 
 export function Navbar({ className }: { className?: string }) {
   const { data: auth, isPending } = authClient.useSession();
+  const preferences = useClientPreferences(Boolean(auth?.user));
+  const menu = (data.menu ?? []).filter(
+    (item) => item.url !== "/settings" || preferences.data?.canAdmin,
+  );
 
   if (isPending) {
     return <NavbarSkeleton />;
@@ -81,18 +73,18 @@ export function Navbar({ className }: { className?: string }) {
 
   if (!auth || !auth.user) {
     return (
-      <div className="flex flex-row content-center justify-between max-h-12">
-        <Link to="/" className="flex flex-row gap-3">
-          <img src={logo} className="size-10" alt="imi/tickets" />
-          <h2>imi/tickets</h2>
-        </Link>
-        <div className="flex flex-row gap-3">
-          <ThemeToggle />
-          <Button onClick={() => signInWithDiscord("/")}>
-            Sign In
-          </Button>
+      <section className={cn("py-4", className)}>
+        <div className="flex flex-row content-center justify-between max-h-12">
+          <Link to="/" className="flex flex-row gap-3">
+            <img src={logo} className="size-10" alt="imi/tickets" />
+            <h2>imi/tickets</h2>
+          </Link>
+          <div className="flex flex-row gap-3">
+            <ThemeToggle />
+            <Button onClick={() => signInWithDiscord("/")}>Sign In</Button>
+          </div>
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -103,30 +95,25 @@ export function Navbar({ className }: { className?: string }) {
         <nav className="hidden items-center justify-between lg:flex">
           <div className="flex items-center gap-6">
             {/* Logo */}
-            <a href={data.logo.url} className="flex items-center gap-2">
-              <img
-                src={data.logo.src}
-                className="max-h-8"
-                alt={data.logo.alt}
-              />
+            <Link to="/" className="flex items-center gap-2">
+              <img src={logo} className="max-h-8" alt="logo" />
               <span className="text-lg font-semibold tracking-tighter">
-                {data.logo.title}
+                imi/tickets
               </span>
-            </a>
+            </Link>
             <div className="flex items-center">
               <NavigationMenu>
                 <NavigationMenuList>
-                  {data.menu?.map((item) => renderMenuItem(item))}
+                  {menu.map((item) => renderMenuItem(item))}
                 </NavigationMenuList>
               </NavigationMenu>
             </div>
           </div>
           <div className="flex gap-2">
             <ThemeToggle />
-            <Button variant="destructive"
-              onClick={async () =>
-                await authClient.signOut()
-              }
+            <Button
+              variant="destructive"
+              onClick={async () => await authClient.signOut()}
             >
               <LogOut className="size-5" />
               Log Out
@@ -138,13 +125,9 @@ export function Navbar({ className }: { className?: string }) {
         <div className="block lg:hidden">
           <div className="flex items-center justify-between">
             {/* Logo */}
-            <a href={data.logo.url} className="flex items-center gap-2">
-              <img
-                src={data.logo.src}
-                className="max-h-8 dark:invert"
-                alt={data.logo.alt}
-              />
-            </a>
+            <Link to="/" className="flex items-center gap-2">
+              <img src={logo} className="max-h-8 dark:invert" alt="logo" />
+            </Link>
             <Sheet>
               <SheetTrigger>
                 <Button variant="outline" size="icon">
@@ -154,27 +137,29 @@ export function Navbar({ className }: { className?: string }) {
               <SheetContent className="overflow-y-auto">
                 <SheetHeader>
                   <SheetTitle>
-                    <a href={data.logo.url} className="flex items-center gap-2">
+                    <Link to="/" className="flex items-center gap-2">
                       <img
-                        src={data.logo.src}
+                        src={logo}
                         className="max-h-8 dark:invert"
-                        alt={data.logo.alt}
+                        alt="logo"
                       />
-                    </a>
+                    </Link>
                   </SheetTitle>
                 </SheetHeader>
                 <div className="flex flex-col gap-6 p-4">
-                  {data.menu && (<Accordion
-                    className="flex w-full flex-col gap-4"
-                  >
-                    {data.menu.map((item) => renderMobileMenuItem(item))}
-                  </Accordion>)}
+                  {menu.length > 0 && (
+                    <Accordion className="flex w-full flex-col gap-4">
+                      {menu.map((item) => renderMobileMenuItem(item))}
+                    </Accordion>
+                  )}
 
                   <div className="flex flex-col gap-3">
                     <ThemeToggle />
-                    <Button variant="outline"
+                    <Button
+                      variant="outline"
                       onClick={async () => await authClient.signOut()}
-                    >Log Out
+                    >
+                      Log Out
                     </Button>
                   </div>
                 </div>
@@ -256,4 +241,3 @@ const SubMenuLink = ({ item }: { item: MenuItem }) => {
     </a>
   );
 };
-

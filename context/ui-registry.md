@@ -91,7 +91,7 @@ Implemented steps:
 - Optional additional watched server selection.
 - Bot invite checks with Discord OAuth2 invite URLs.
 - Exclusive channel strategy choice: category channels or forum posts.
-- Per-server staff role permission matrix with `READ` and `MANAGE`.
+- Per-server staff role permission matrix with `READ`, `MANAGE`, and `ADMIN`.
 - Review and complete setup.
 
 Staff roles step pattern:
@@ -272,9 +272,12 @@ className="flex flex-1 flex-col gap-3 overflow-y-auto p-4"
 Ticket header:
 
 ```tsx
-className="text-lg font-semibold"
-className="flex gap-3 text-sm text-muted-foreground"
+className="shrink-0 border-b border-border p-4"
+className="mb-2 text-lg font-semibold"
+className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
 ```
+
+Participants use `TicketHeaderParticipants` (`ticket-header-participants.tsx`): stacked avatars (`AvatarGroup`, max 3 + count), truncated summary (`Name +N`), and a click popover listing everyone with Member/Staff badges. Duplicate userId rows (member + staff) collapse into one person with merged roles. Single-user tickets stay non-interactive.
 
 Message group card:
 
@@ -292,7 +295,8 @@ Message group card:
 Message markdown (`message-markdown.tsx`):
 
 - Ticket transcript text renders through `react-markdown` + `remark-gfm` with token-backed typography (headings, lists, links, code, blockquotes).
-- `preprocessMessageMarkdown()` in `utils/messages/markdown.ts` resolves Discord timestamps (`<t:â€¦>`) and italicizes `-#` subtext lines before render.
+- Inline and fenced code use `bg-muted` + `border-border` chips so they stay visible on `bg-card` message shells.
+- `preprocessMessageMarkdown()` in `utils/messages/markdown.ts` resolves Discord timestamps (`<t:…>`), turns legacy `<@id>` mentions into hoverable Discord profile links, and italicizes `-#` subtext lines before render.
 - `stripMarkdown()` powers the plain-text copy variant.
 
 ```tsx
@@ -356,20 +360,20 @@ Uses `Marker` / `MarkerContent` from `components/ui/marker.tsx`.
 Scroll behavior:
 
 - Timeline renders oldestâ†’newest with the newest at the bottom.
-- `useTimeline` reverses each API page (newest-first) and concatenates older pages before newer ones so multi-page order stays chronological.
+- `useTimeline` reverses each API page (newest-first) and concatenates older pages before newer ones so multi-page order stays chronological. The API extends each base page by up to 30 adjacent rows to complete its boundary message group; each fetched page remains a hard visual-group boundary only as the fallback when one group exceeds that cap.
 - `ScrollArea` wraps the timeline; `viewportRef` targets the scrollable viewport for scroll math and TanStack Virtual's `getScrollElement`.
-- TanStack Virtual renders timeline blocks as measured virtual rows with `anchorTo: "end"` + `scrollEndThreshold: 80`. Virtual item kinds include older/newer loading sentinels, audit markers, and message groups.
+- TanStack Virtual renders timeline blocks as measured virtual rows with `anchorTo: "end"` + `scrollEndThreshold: 80`. The virtual list contains only stable-keyed audit/message rows; loading status is an overlay outside it so a sentinel cannot become the prepend anchor.
 - REQUIRED: the `ScrollArea` viewport carries `viewportClassName="[overflow-anchor:none] [overscroll-behavior:contain]"` so the browser's native scroll anchoring stops fighting the virtualizer's `anchorTo` adjustments (this was the root cause of drift/off-bottom bugs).
 - `anchorTo: "end"` keeps the visible keyed item stable when older entries prepend and compensates above-viewport measurement deltas, so there is no manual `scrollTop` restoration. `followOnAppend` is on only in normal (non-highlighted) mode and keeps the view pinned when new realtime messages append while already at the bottom.
+- Backward scrolling freezes already-cached row measurements (TanStack Virtual #659 mitigation), preventing media/markdown ResizeObserver churn from shifting following rows during the gesture. `estimateSize` accounts for group position and message content/media; overscan stays moderate at 10 rows so coarse unmeasured pages do not create a large temporary spacer.
 - First load pins the bottom via `useLayoutEffect` + `rowVirtualizer.scrollToEnd()`, re-asserted every frame until the live DOM reports at-bottom for consecutive frames (verified pin, generous budget), then latched with `didInitialScrollRef`. There is NO manual `scrollTop = scrollHeight` (that used the estimated total size and left the view scrolled up) and no `stickToBottomRef`.
 - Layout `main` uses `min-h-0 flex-1` so the ticket detail column can shrink and scroll internally.
 
 Highlighted messages (`?messageId=1,2,3`):
 
-- Normal `useTimeline` pagination is disabled and the page uses a single, contiguous local window (`windowState`) around the highlighted messages.
-- Initial view seeds the window around the oldest highlighted id and centers on it, not the bottom.
+- Interactive highlight toggles only update `?messageId=` and row styling; they do not change fetching or scroll position. A reload/deep link with highlights seeds a contiguous local window (`windowState`) around the oldest highlighted id and centers on it.
 - The window only ever grows: `loadWindowPage("older"|"newer")` prepends/appends contiguous keyset pages. It never wholesale-replaces during infinite scroll, so keys stay stable and `anchorTo: "end"` keeps the view anchored.
-- Infinite loading and the two chevrons share this one list. Loading triggers from BOTH the viewport `onScroll` handler and a virtual-range-change effect (belt and braces); both call the same gated pixel-threshold check against live `scrollTop`/`scrollHeight`. Loading is gated by real state flags (`isCentering`, `isSeeking`, `windowPagingDirection`) â€” never a ref â€” and re-checked once after each window change.
+- Infinite loading and the two chevrons share this one list. Loading triggers from the viewport `onScroll` handler using live `scrollTop`/`scrollHeight`, with one post-window-change edge check. A synchronous in-flight ref prevents duplicate loads before React state commits; virtual-range changes do not trigger loading because they race prepend anchoring.
 - With 2+ highlights, floating `ChevronUp` / `ChevronDown` buttons (bottom-right) jump to the nearest highlighted target above/below. Targets are computed POSITIONALLY on every scroll â€” rendered rows by DOM rect, loaded-but-virtualized-out rows by `rowVirtualizer.measurementsCache` offsets, and not-yet-loaded highlights by message-id order vs the loaded window's chronological bounds. Never derive them from a remembered "active highlight" index; it goes stale the moment the user scrolls manually (missing/wrong-direction chevrons).
 - Jump clicks supersede any centering loop still in flight via a generation counter ref (a stale loop exits without finalizing); they are never silently ignored.
 - ALL jumps go through one measurement-aware centering loop (`finishPendingHighlightScroll`): phase 1 mounts the target block via `scrollToIndex(align:center)` (smooth issued once for in-window jumps; auto re-issued for seeds/seeks), phase 2 exact-centers the individual `[data-message-id]` row via `rowVirtualizer.scrollBy(delta)` once its element exists, finishing when stable for consecutive frames. NEVER pair a one-shot smooth `scrollToIndex` with a fixed-delay native `scrollIntoView` â€” the virtualizer clamps far targets to the estimated max offset and the row may not exist yet, which parked jumps at the bottom.
@@ -382,15 +386,11 @@ Known cleanup when editing:
 
 ### Message Grouping
 
-**File:** `apps/web/src/features/tickets/utils/messages/groups.ts`
+**File:** `apps/web/src/features/tickets/utils/timeline/blocks.ts` (transcript)
 
-Groups consecutive messages by same `authorId` within two minutes.
+Chains consecutive same-author, same-channel messages within two minutes. **Replies** and **private staff notes** always start a new solo group so they get lead chrome (avatar + reply snippet). The grouping predicate is shared with backend pagination through `packages/shared/src/timeline.ts`; changes to author/channel/time/reply/private semantics must be made there so page completion and visual grouping stay aligned.
 
-```ts
-const CHAIN_TIME_MS = 2 * 60 * 1000;
-```
-
-Use this helper for Discord-like message grouping instead of duplicating grouping logic in components.
+Helper `apps/web/src/features/tickets/utils/messages/groups.ts` remains for simpler list grouping without reply/private rules.
 
 ## API And Query Patterns
 
@@ -509,7 +509,25 @@ className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6"
 </Tabs>
 ```
 
-Sections use `Card` groups for Privacy, Tickets, channel ticket panel, and Discord channels. Boolean options use `Switch` + `Label` rows. Staff without `MANAGE` see a read-only badge and disabled controls. Staff with `ADMIN` see the Data & privacy tab for bulk deletion and GDPR export/anonymize/erase.
+Sections use `Card` groups for Bot prefixes, Message filters, Privacy, Tickets, channel ticket panel, and Discord channels. Boolean options use `Switch` + `Label` rows. Staff without `MANAGE` see a read-only badge and disabled controls. Staff with `ADMIN` see the Data & privacy tab for bulk deletion and GDPR export/anonymize/erase.
+
+### Author hover card
+
+**File:** `apps/web/src/features/tickets/components/author-hover-card.tsx`
+
+Wraps lead avatar/name on message groups. Snapshot identity stays on the row; hover fetches `GET /discord/users/:userId` via `useDiscordUser` (`staleTime` 5 minutes). Synthetic/non-snowflake authors skip the card. When the bot resolves primary-guild membership with roles, the card lists them (excluding `@everyone`, highest first) as outline badges with a Discord role-color swatch (max 8, then `+N more`). Empty or unresolved role lists omit the block.
+
+System profile transcript rows store display names as Discord profile markdown links (`https://discord.com/users/:id`). `MessageMarkdown` turns those (and legacy `<@id>` mentions) into `UserMentionLink` hover cards; role mentions in older rows normalize to plain "Role" text while new rows store role names.
+
+### Message reaction hover card
+
+**File:** `apps/web/src/features/tickets/components/message-reactions.tsx`
+
+Each reaction chip opens a `HoverCard` listing every `userIds` reactor for that emoji. Fetches profiles only while open via `useDiscordUser` (same cache as author cards). Header shows the emoji + count; body is a scrollable avatar/name list. Trigger click uses `stopPropagation` so highlight toggles do not fire.
+
+Unicode reaction glyphs render via `@discordapp/twemoji` (`ReactionEmoji` + `lib/twemoji.ts` → SVG from Discord’s pinned `jdecked/twemoji@16.0.1` asset base). Custom Discord emoji keep `cdn.discordapp.com/emojis/...`.
+
+Message body text also uses Twemoji through `TwemojiText` inside `MessageMarkdown`. Emoji-only messages (unicode and/or `<:name:id>` / `<a:name:id>`, whitespace allowed, max 27 emoji) get Discord-style jumbo sizing (`size-12`); mixed text stays at ~1.375em inline.
 
 ### Data & Privacy Settings
 

@@ -12,6 +12,14 @@ export function fetchSettings() {
   return api.get<SettingsResponse>("/settings");
 }
 
+export function fetchClientPreferences() {
+  return api.get<{
+    useChannelNameForTranscript: boolean;
+    canManage: boolean;
+    canAdmin: boolean;
+  }>("/settings/client-preferences");
+}
+
 export function fetchSettingsChannels() {
   return api.get<SettingsChannelsResponse>("/settings/channels");
 }

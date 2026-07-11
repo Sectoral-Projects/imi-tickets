@@ -11,10 +11,11 @@ import {
 } from "../api/templates";
 import type { ChannelOpenButtonDraft, DmOpenButtonDraft } from "../schemas/templates";
 
-export function useTemplates() {
+export function useTemplates(enabled = true) {
   return useQuery({
     queryKey: ["templates"] as const,
     queryFn: fetchTemplates,
+    enabled,
   });
 }
 
@@ -43,10 +44,11 @@ export function useDeleteTemplate() {
   });
 }
 
-export function useDmOpenButtons() {
+export function useDmOpenButtons(enabled = true) {
   return useQuery({
     queryKey: ["dm-open-buttons"] as const,
     queryFn: fetchDmOpenButtons,
+    enabled,
   });
 }
 
@@ -58,10 +60,11 @@ export function useReplaceDmOpenButtons() {
   });
 }
 
-export function useChannelOpenButtons() {
+export function useChannelOpenButtons(enabled = true) {
   return useQuery({
     queryKey: ["channel-open-buttons"] as const,
     queryFn: fetchChannelOpenButtons,
+    enabled,
   });
 }
 

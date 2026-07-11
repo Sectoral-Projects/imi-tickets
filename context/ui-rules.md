@@ -59,7 +59,10 @@ Step content:
 - Start or guide the bot invite flow as needed for each server.
 - Select one ticket-channel strategy: Discord category channels or Discord forum-channel posts.
 - Configure staff roles per Discord server.
-- Staff role permissions must be modular. Start with `READ` and `MANAGE`, and keep the UI easy to extend for future permission flags.
+- Staff role permissions must be modular. Start with `READ`, `MANAGE`, and `ADMIN`, and keep the UI easy to extend for future permission flags.
+- `READ` is for viewing tickets/transcripts on the staff site.
+- `MANAGE` is for most Discord staff commands (close, contact, rename, logs, etc.).
+- `ADMIN` unlocks `/settings` editing and sensitive commands such as `block` / `unblock`.
 
 Interaction rules:
 

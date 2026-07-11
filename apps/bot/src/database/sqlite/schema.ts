@@ -256,7 +256,7 @@ export const threadParticipants = sqliteTable(
 	},
 	(table) => [
 		primaryKey({
-			columns: [table.threadId, table.userId]
+			columns: [table.threadId, table.userId, table.role]
 		}),
 		index("thread_participants_user_id_idx").on(table.userId)
 	]

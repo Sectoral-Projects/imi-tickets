@@ -10,7 +10,7 @@ export default class SystemComponents extends Route {
 		app.get(path, (c) => this.listSystemComponents(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async listSystemComponents(c: Context<ApiEnv, string, BlankInput>) {
 		return c.json({ components: MessageTemplateService.listSystemComponents() });
 	}

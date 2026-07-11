@@ -206,9 +206,10 @@ export function DataPrivacySettingsSection({ disabled = false }: { disabled?: bo
             GDPR subject requests
           </CardTitle>
           <CardDescription>
-            Export or process erasure for a Discord user. Anonymization assigns one new random ID
-            across all of their records so tickets still render as a single person without any link
-            to the original account.
+            Export or process erasure for a Discord user. Anonymization assigns one new random
+            alphanumeric ID (for example <code className="text-foreground">anon_…</code>) across
+            all of their records so tickets still render as a single person without any link to the
+            original account, and without colliding with a real Discord user ID.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

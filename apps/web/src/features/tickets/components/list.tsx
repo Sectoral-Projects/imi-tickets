@@ -16,10 +16,12 @@ import { Link } from "react-router";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuthGate, useProductAccessRedirect } from "@/lib/use-auth-gate";
 import { useRealtime } from "@/lib/use-realtime";
-import { useSettings } from "@/features/settings/hooks/settings";
+import { useClientPreferences } from "@/features/settings/hooks/settings";
 import { TicketListSkeleton } from "./ticket-list-skeleton";
 import { ticketStatusBadgeVariant } from "../utils/status-badge";
 import { formatTicketListTitle } from "../utils/display-title";
+import { UnauthorizedScreen } from "@/components/unauthorized-screen";
+import { ApiError } from "@/lib/api";
 
 type TicketStatusFilter = "all" | "open" | "closed";
 
@@ -34,8 +36,8 @@ export function TicketList() {
   "use no memo";
 
   const session = useAuthGate();
-  const { data: settings } = useSettings();
-  const useChannelNameForTranscript = Boolean(settings?.settings.useChannelNameForTranscript);
+  const { data: preferences } = useClientPreferences(Boolean(session.data));
+  const useChannelNameForTranscript = Boolean(preferences?.useChannelNameForTranscript);
   const [searchInput, setSearchInput] = useState("");
   const search = searchInput;
   const [status, setStatus] = useState<TicketStatusFilter>("all");
@@ -141,6 +143,12 @@ export function TicketList() {
   }
 
   if (error) {
+    if (error instanceof ApiError && error.code === "FORBIDDEN") {
+      return (
+        <UnauthorizedScreen description="You need the Read permission to view tickets." />
+      );
+    }
+
     return (
       <div className="p-4 text-sm text-muted-foreground md:p-6">
         Error: {error.message}

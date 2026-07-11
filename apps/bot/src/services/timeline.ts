@@ -1,6 +1,11 @@
 import { auditLog, messages } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import {
+	MAX_ADJACENT_GROUP_MESSAGES,
+	canGroupAdjacentMessages,
+	completePageAtGroupBoundary
+} from '@imi/tickets-shared';
 import { AuditAction } from './audit';
 import type { EnrichedMessage } from './message';
 import { MessageService } from './message';
@@ -60,7 +65,13 @@ type TimelineRow = {
 	kind: 'message' | 'audit';
 	entity_id: number;
 	created_at: number | Date;
+	author_id: string | null;
+	channel_id: string | null;
+	is_private_staff: number | boolean | null;
+	reply_to_message_id: number | null;
 };
+
+type TimelineRowOrder = 'newest-first' | 'oldest-first';
 
 export abstract class TimelineService {
 	static listTimeline(input: ListTimelineInput, db: DbClient = container.sqlite): ListTimelineResult {
@@ -68,35 +79,16 @@ export abstract class TimelineService {
 		const cursor = input.cursor ?? 0;
 
 		const rows = db.all<TimelineRow>(sql`
-			SELECT kind, entity_id, created_at
-			FROM (
-				SELECT
-					'message' AS kind,
-					${messages.id} AS entity_id,
-					${messages.createdAt} AS created_at
-				FROM ${messages}
-				WHERE ${messages.threadId} = ${input.threadId}
-					AND ${messages.deletedAt} IS NULL
-				UNION ALL
-				SELECT
-					'audit' AS kind,
-					${auditLog.id} AS entity_id,
-					${auditLog.createdAt} AS created_at
-				FROM ${auditLog}
-				WHERE ${auditLog.threadId} = ${input.threadId}
-					AND ${auditLog.action} IN (${sql.join(
-						LIFECYCLE_AUDIT_ACTIONS.map((action) => sql`${action}`),
-						sql`, `
-					)})
-			)
+			SELECT *
+			FROM (${timelineUnionSql(input.threadId)})
 			ORDER BY created_at DESC, entity_id DESC
-			LIMIT ${limit + 1}
+			LIMIT ${limit + MAX_ADJACENT_GROUP_MESSAGES + 1}
 			OFFSET ${cursor}
 		`);
 
-		const hasMore = rows.length > limit;
-		const page = hasMore ? rows.slice(0, limit) : rows;
-		const nextCursor = hasMore ? cursor + limit : null;
+		const page = completeMessageGroupAtPageEdge(rows, limit, 'newest-first');
+		const hasMore = rows.length > page.length;
+		const nextCursor = hasMore ? cursor + page.length : null;
 
 		if (page.length === 0) {
 			return { items: [], nextCursor };
@@ -142,7 +134,11 @@ export abstract class TimelineService {
 			SELECT
 				'message' AS kind,
 				${messages.id} AS entity_id,
-				${messages.createdAt} AS created_at
+				${messages.createdAt} AS created_at,
+				${messages.authorId} AS author_id,
+				${messages.channelId} AS channel_id,
+				${messages.isPrivateStaff} AS is_private_staff,
+				${messages.replyToMessageId} AS reply_to_message_id
 			FROM ${messages}
 			WHERE ${messages.threadId} = ${input.threadId}
 				AND ${messages.id} = ${input.messageId}
@@ -159,27 +155,29 @@ export abstract class TimelineService {
 		const targetCursor = toTimelineCursorParts(target);
 
 		const olderRows = db.all<TimelineRow>(sql`
-			SELECT kind, entity_id, created_at
+			SELECT *
 			FROM (${timelineUnionSql(input.threadId)})
 			WHERE created_at < ${targetCursor.createdAt}
 				OR (created_at = ${targetCursor.createdAt} AND entity_id < ${targetCursor.entityId})
 			ORDER BY created_at DESC, entity_id DESC
-			LIMIT ${beforeLimit + 1}
+			LIMIT ${beforeLimit + MAX_ADJACENT_GROUP_MESSAGES + 1}
 		`);
 		const newerRows = db.all<TimelineRow>(sql`
-			SELECT kind, entity_id, created_at
+			SELECT *
 			FROM (${timelineUnionSql(input.threadId)})
 			WHERE created_at > ${targetCursor.createdAt}
 				OR (created_at = ${targetCursor.createdAt} AND entity_id >= ${targetCursor.entityId})
 			ORDER BY created_at ASC, entity_id ASC
-			LIMIT ${afterLimit + 2}
+			LIMIT ${afterLimit + 1 + MAX_ADJACENT_GROUP_MESSAGES + 1}
 		`);
 
-		const hasOlder = olderRows.length > beforeLimit;
-		const hasNewer = newerRows.length > afterLimit + 1;
+		const completedOlderRows = completeMessageGroupAtPageEdge(olderRows, beforeLimit, 'newest-first');
+		const completedNewerRows = completeMessageGroupAtPageEdge(newerRows, afterLimit + 1, 'oldest-first');
+		const hasOlder = olderRows.length > completedOlderRows.length;
+		const hasNewer = newerRows.length > completedNewerRows.length;
 		const page = [
-			...olderRows.slice(0, beforeLimit).reverse(),
-			...newerRows.slice(0, afterLimit + 1)
+			...completedOlderRows.reverse(),
+			...completedNewerRows
 		];
 
 		return {
@@ -197,15 +195,16 @@ export abstract class TimelineService {
 		db: DbClient
 	): ListTimelineWindowResult {
 		const rows = db.all<TimelineRow>(sql`
-			SELECT kind, entity_id, created_at
+			SELECT *
 			FROM (${timelineUnionSql(threadId)})
 			WHERE created_at < ${cursor.createdAt}
 				OR (created_at = ${cursor.createdAt} AND entity_id < ${cursor.entityId})
 			ORDER BY created_at DESC, entity_id DESC
-			LIMIT ${limit + 1}
+			LIMIT ${limit + MAX_ADJACENT_GROUP_MESSAGES + 1}
 		`);
-		const hasMore = rows.length > limit;
-		const page = rows.slice(0, limit).reverse();
+		const completedPage = completeMessageGroupAtPageEdge(rows, limit, 'newest-first');
+		const hasMore = rows.length > completedPage.length;
+		const page = completedPage.reverse();
 
 		return {
 			items: this.rowsToItems(threadId, page, db),
@@ -222,15 +221,15 @@ export abstract class TimelineService {
 		db: DbClient
 	): ListTimelineWindowResult {
 		const rows = db.all<TimelineRow>(sql`
-			SELECT kind, entity_id, created_at
+			SELECT *
 			FROM (${timelineUnionSql(threadId)})
 			WHERE created_at > ${cursor.createdAt}
 				OR (created_at = ${cursor.createdAt} AND entity_id > ${cursor.entityId})
 			ORDER BY created_at ASC, entity_id ASC
-			LIMIT ${limit + 1}
+			LIMIT ${limit + MAX_ADJACENT_GROUP_MESSAGES + 1}
 		`);
-		const hasMore = rows.length > limit;
-		const page = rows.slice(0, limit);
+		const page = completeMessageGroupAtPageEdge(rows, limit, 'oldest-first');
+		const hasMore = rows.length > page.length;
 
 		return {
 			items: this.rowsToItems(threadId, page, db),
@@ -309,7 +308,11 @@ function timelineUnionSql(threadId: number) {
 		SELECT
 			'message' AS kind,
 			${messages.id} AS entity_id,
-			${messages.createdAt} AS created_at
+			${messages.createdAt} AS created_at,
+			${messages.authorId} AS author_id,
+			${messages.channelId} AS channel_id,
+			${messages.isPrivateStaff} AS is_private_staff,
+			${messages.replyToMessageId} AS reply_to_message_id
 		FROM ${messages}
 		WHERE ${messages.threadId} = ${threadId}
 			AND ${messages.deletedAt} IS NULL
@@ -317,7 +320,11 @@ function timelineUnionSql(threadId: number) {
 		SELECT
 			'audit' AS kind,
 			${auditLog.id} AS entity_id,
-			${auditLog.createdAt} AS created_at
+			${auditLog.createdAt} AS created_at,
+			NULL AS author_id,
+			NULL AS channel_id,
+			NULL AS is_private_staff,
+			NULL AS reply_to_message_id
 		FROM ${auditLog}
 		WHERE ${auditLog.threadId} = ${threadId}
 			AND ${auditLog.action} IN (${sql.join(
@@ -325,6 +332,38 @@ function timelineUnionSql(threadId: number) {
 				sql`, `
 			)})
 	`;
+}
+
+function completeMessageGroupAtPageEdge(
+	rows: TimelineRow[],
+	baseLimit: number,
+	order: TimelineRowOrder
+): TimelineRow[] {
+	return completePageAtGroupBoundary(rows, baseLimit, (currentEdge, candidate) => {
+		const older = order === 'newest-first' ? candidate : currentEdge;
+		const newer = order === 'newest-first' ? currentEdge : candidate;
+		return timelineRowsCanGroup(older, newer);
+	});
+}
+
+function timelineRowsCanGroup(older: TimelineRow, newer: TimelineRow) {
+	if (older.kind !== 'message' || newer.kind !== 'message') return false;
+	return canGroupAdjacentMessages(
+		{
+			authorId: older.author_id,
+			channelId: older.channel_id,
+			createdAt: older.created_at,
+			isPrivateStaff: Boolean(older.is_private_staff),
+			hasReply: older.reply_to_message_id !== null
+		},
+		{
+			authorId: newer.author_id,
+			channelId: newer.channel_id,
+			createdAt: newer.created_at,
+			isPrivateStaff: Boolean(newer.is_private_staff),
+			hasReply: newer.reply_to_message_id !== null
+		}
+	);
 }
 
 function encodeTimelineCursor(row: TimelineRow) {

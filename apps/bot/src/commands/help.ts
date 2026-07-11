@@ -5,6 +5,9 @@ import { ApplicationIntegrationType, InteractionContextType, Message } from 'dis
 
 const COMMANDS = [
 	['contact', 'Create a ticket with one or more mentioned members.'],
+	['add', 'Add a member to the current ticket.'],
+	['remove', 'Remove a member from the current ticket.'],
+	['participants', 'List members and staff on the current ticket.'],
 	['logs', 'Show previous tickets for a member.'],
 	['block', 'Block a user or role from tickets and bot commands.'],
 	['blocked', 'Show blocked users and roles.'],
@@ -38,7 +41,7 @@ export class HelpCommand extends Command {
 	}
 
 	private async replyHelp(target: Message | Command.ChatInputCommandInteraction) {
-		const { lines, totalPages } = pageLines(COMMANDS, ([name, description]) => `• **${name}** — ${description}`, 0, 10);
+		const { lines, totalPages } = pageLines(COMMANDS, ([name, description]) => `• **${name}** — ${description}`, 0, 12);
 		return replyComponents(
 			target,
 			textComponent('Staff commands', lines, {

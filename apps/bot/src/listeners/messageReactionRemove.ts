@@ -1,5 +1,4 @@
 import {
-	fetchReactionSourceMessage,
 	resolveReactionMirrorTargetsFromPacket,
 	resolveTicketReactionPacket,
 	type TicketReactionPacket
@@ -37,17 +36,20 @@ export class MessageReactionRemoveEvent extends Listener {
 			{ publish: false }
 		);
 
-		if (shouldMirror) {
+		// Heal from every linked Discord copy before deciding whether the
+		// bot mirror can leave. One participant removing an emoji must not
+		// clear staff/DM mirrors while another participant still has it.
+		await MessageReactionService.ingestHumansFromLinkedCopies(stored, thread, emoji);
+
+		if (
+			shouldMirror &&
+			!MessageReactionService.hasRemainingReactors(stored.id, emoji)
+		) {
 			const targets = resolveReactionMirrorTargetsFromPacket(discordMessageId, channelId, thread);
 			if (targets.length > 0) {
-				const sourceMessage = await fetchReactionSourceMessage(channelId, discordMessageId);
-				if (sourceMessage) {
-					await TicketChannelService.mirrorReactionRemoveFromLinkedMessages(emoji, sourceMessage, targets);
-				}
+				await TicketChannelService.mirrorReactionRemoveFromLinkedMessages(emoji, targets);
 			}
 		}
-
-		await MessageReactionService.ingestHumansFromLinkedCopies(stored, thread, emoji);
 
 		RealtimeService.publish({
 			type: 'message.updated',

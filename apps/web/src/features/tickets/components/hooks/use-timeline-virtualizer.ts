@@ -5,19 +5,31 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  measureElement as measureVirtualElement,
+  useVirtualizer,
+} from "@tanstack/react-virtual";
 import type { TimelineItem } from "../../schemas/timeline";
+import type { EnrichedMessage } from "../../schemas/messages";
 import {
   buildTimelineBlocks,
   flattenTimelineBlocks,
 } from "../../utils/timeline/blocks";
 import type { FlattenedTimelineRow } from "../../utils/timeline/blocks";
 import {
+  dedupeEmbedVideoAttachments,
+  isEmbedVideoAttachment,
+  isHostedVideoUrl,
+  isImageMediaUrl,
+  shouldRenderInlineMedia,
+} from "../../utils/message-media";
+import {
   classifyHighlightElement,
   type HighlightPosition,
 } from "../../utils/timeline/highlight-navigation";
 import type { TimelineWindowState } from "./use-timeline-window";
 import type { TimelineWindowDirection } from "../../api/timeline";
+import { isJumboEmojiMessage } from "@/lib/twemoji";
 
 // Preload distance from an edge (in px) that triggers a page load.
 const EDGE_LOAD_THRESHOLD_PX = 600;
@@ -26,15 +38,108 @@ const CENTER_TOLERANCE_PX = 4;
 const CENTER_STABLE_FRAMES = 2;
 const BOTTOM_PIN_STABLE_FRAMES = 3;
 const BOTTOM_PIN_MAX_FRAMES = 180;
-export const TIMELINE_SENTINEL_SIZE_PX = 40;
+const ESTIMATED_TEXT_LINE_HEIGHT_PX = 20;
+const ESTIMATED_CHARS_PER_LINE = 72;
 
-export type TimelineRenderItem =
-  | { kind: "older-sentinel" }
-  | { kind: "newer-sentinel" }
-  | FlattenedTimelineRow;
+function estimateTextHeight(content: string) {
+  if (!content.trim()) return 0;
+
+  const visualLines = content.split("\n").reduce((count, line) => {
+    return count + Math.max(1, Math.ceil(line.length / ESTIMATED_CHARS_PER_LINE));
+  }, 0);
+
+  return visualLines * ESTIMATED_TEXT_LINE_HEIGHT_PX;
+}
+
+function estimateMessageBodyHeight(message: EnrichedMessage) {
+  let height = isJumboEmojiMessage(message.content)
+    ? 48
+    : estimateTextHeight(message.content);
+  const embedVideos = dedupeEmbedVideoAttachments(
+    message.attachments.filter(isEmbedVideoAttachment),
+  );
+  const inlineMedia = message.attachments.filter(
+    (attachment) =>
+      shouldRenderInlineMedia(attachment) &&
+      !isEmbedVideoAttachment(attachment),
+  );
+  const files = message.attachments.filter(
+    (attachment) =>
+      !shouldRenderInlineMedia(attachment) &&
+      !isEmbedVideoAttachment(attachment),
+  );
+
+  const appendSection = (sectionHeight: number) => {
+    if (sectionHeight <= 0) return;
+    if (height > 0) height += 8;
+    height += sectionHeight;
+  };
+
+  // Use comfortable upper bounds as recommended by estimateSize. These rows
+  // are measured before entering view; the estimate mainly keeps prepend
+  // anchoring close while that first measurement is pending.
+  appendSection(
+    embedVideos.length > 0
+      ? embedVideos.length * 420 + (embedVideos.length - 1) * 8
+      : 0,
+  );
+  appendSection(
+    inlineMedia.reduce((total, attachment) => {
+      const mediaHeight = isImageMediaUrl(attachment.url)
+        ? 320
+        : isHostedVideoUrl(attachment.url)
+          ? 240
+          : 0;
+      return total + mediaHeight;
+    }, 0) + Math.max(0, inlineMedia.length - 1) * 8,
+  );
+  appendSection(files.length * 20 + Math.max(0, files.length - 1) * 4);
+
+  if (message.isForwarded && height > 0) height += 26;
+  return height;
+}
+
+function estimateTimelineRowSize(row: TimelineRenderItem) {
+  if (row.kind === "audit") return 44;
+
+  const { message, groupPos } = row;
+  const isLead = groupPos === "solo" || groupPos === "start";
+  const isGroupEnd = groupPos === "solo" || groupPos === "end";
+  const bodyHeight = estimateMessageBodyHeight(message);
+  const replyHeight = message.replyTo ? 20 : 0;
+  const reactionHeight =
+    message.reactions.length > 0
+      ? Math.ceil(message.reactions.length / 6) * 26
+      : 0;
+  const outerGroupGap = isGroupEnd ? 16 : 0;
+
+  if (isLead) {
+    const contentColumnHeight =
+      replyHeight + 20 + 4 + bodyHeight + reactionHeight;
+    const avatarColumnHeight = message.replyTo ? 60 : 40;
+    const verticalPadding = groupPos === "solo" ? 32 : 20;
+    return (
+      verticalPadding +
+      Math.max(contentColumnHeight, avatarColumnHeight) +
+      outerGroupGap
+    );
+  }
+
+  const verticalPadding = groupPos === "end" ? 20 : 8;
+  return (
+    verticalPadding +
+    replyHeight +
+    bodyHeight +
+    reactionHeight +
+    outerGroupGap
+  );
+}
+
+export type TimelineRenderItem = FlattenedTimelineRow;
 
 export type UseTimelineVirtualizerOptions = {
   displayedItems: TimelineItem[];
+  groupBreakBeforeKeys: ReadonlySet<string>;
   scrollViewportRef: React.RefObject<HTMLDivElement | null>;
   hasHighlightedMode: boolean;
   sortedHighlightedIds: number[];
@@ -53,18 +158,19 @@ export type UseTimelineVirtualizerOptions = {
   pendingScrollMessageIdRef: React.MutableRefObject<number | null>;
   pendingReplyJumpFlashIdRef: React.MutableRefObject<number | null>;
   didInitialScrollRef: React.MutableRefObject<boolean>;
-  triggerReplyJumpFlashRef: React.MutableRefObject<(id: number) => void>;
+  triggerReplyJumpFlash: (id: number) => void;
   setIsCentering: (v: boolean) => void;
   setIsSeeking: (v: boolean) => void;
   setJumpAboveId: (v: number | null) => void;
   setJumpBelowId: (v: number | null) => void;
-  fetchNextPage: () => void;
+  fetchNextPage: () => void | Promise<unknown>;
   loadWindowPage: (dir: TimelineWindowDirection) => Promise<void>;
 };
 
 export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
   const {
     displayedItems,
+    groupBreakBeforeKeys,
     scrollViewportRef,
     hasHighlightedMode,
     sortedHighlightedIds,
@@ -83,7 +189,7 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     pendingScrollMessageIdRef,
     pendingReplyJumpFlashIdRef,
     didInitialScrollRef,
-    triggerReplyJumpFlashRef,
+    triggerReplyJumpFlash,
     setIsCentering,
     setIsSeeking,
     setJumpAboveId,
@@ -92,35 +198,17 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     loadWindowPage,
   } = opts;
 
+  // Real timeline rows only — no sentinel rows in the virtual list. A stable
+  // "older-sentinel" key at index 0 breaks anchorTo:"end" near the top because
+  // the anchor key never moves when messages prepend.
   const timelineRows = useMemo(
-    () => flattenTimelineBlocks(buildTimelineBlocks(displayedItems)),
-    [displayedItems],
+    () =>
+      flattenTimelineBlocks(
+        buildTimelineBlocks(displayedItems, groupBreakBeforeKeys),
+      ),
+    [displayedItems, groupBreakBeforeKeys],
   );
-
-  const timelineRenderItems = useMemo<TimelineRenderItem[]>(() => {
-    const items: TimelineRenderItem[] = [];
-
-    if (
-      (usesWindowPaging && windowState?.previousCursor) ||
-      (!usesWindowPaging && hasNextPage)
-    ) {
-      items.push({ kind: "older-sentinel" });
-    }
-
-    items.push(...timelineRows);
-
-    if (usesWindowPaging && windowState?.nextCursor) {
-      items.push({ kind: "newer-sentinel" });
-    }
-
-    return items;
-  }, [
-    hasNextPage,
-    timelineRows,
-    usesWindowPaging,
-    windowState?.nextCursor,
-    windowState?.previousCursor,
-  ]);
+  const timelineRenderItems = timelineRows;
 
   const loadedMessageIdBounds = useMemo(() => {
     let first: number | null = null;
@@ -133,41 +221,70 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     return { first, last };
   }, [displayedItems]);
 
+  // Stable getItemKey is required for prepend anchoring (TanStack chat guide).
+  const getItemKey = useCallback(
+    (index: number) => {
+      const item = timelineRenderItems[index];
+      if (!item) return `idx-${index}`;
+      if (item.kind === "audit") return `audit-${item.auditId}`;
+      return `message-${item.message.id}`;
+    },
+    [timelineRenderItems],
+  );
+
+  const estimatedSizes = useMemo(
+    () => timelineRenderItems.map(estimateTimelineRowSize),
+    [timelineRenderItems],
+  );
+  const estimateSize = useCallback(
+    (index: number) => estimatedSizes[index] ?? 96,
+    [estimatedSizes],
+  );
+
+  // Dynamic rows (especially media) can emit repeated ResizeObserver
+  // measurements while the user scrolls backward. Updating cached heights
+  // during that gesture moves every following absolute row and causes the
+  // well-known TanStack Virtual upward-scroll jitter (#659). Keep the last
+  // accepted size until scrolling stops; unseen rows still receive their first
+  // real measurement.
+  const measureTimelineElement = useCallback(
+    (
+      element: Element,
+      entry: ResizeObserverEntry | undefined,
+      instance: Parameters<typeof measureVirtualElement>[2],
+    ) => {
+      if (instance.scrollDirection === "backward") {
+        const index = Number(element.getAttribute("data-index"));
+        if (Number.isInteger(index)) {
+          const key = instance.options.getItemKey(index);
+          const cachedSize = instance.itemSizeCache.get(key);
+          if (cachedSize !== undefined) return cachedSize;
+        }
+      }
+
+      return measureVirtualElement(element, entry, instance);
+    },
+    [],
+  );
+
+  // Match the official chat example + our ticket list: React owns total size and
+  // row transforms. directDomUpdates fought ScrollArea scroll sync on prepend.
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual owns scroll state outside React memoization.
   const rowVirtualizer = useVirtualizer({
     count: timelineRenderItems.length,
     getScrollElement: () => scrollViewportRef.current,
-    estimateSize: (index) => {
-      const item = timelineRenderItems[index];
-      if (!item) return 96;
-      if (item.kind === "older-sentinel" || item.kind === "newer-sentinel") {
-        return TIMELINE_SENTINEL_SIZE_PX;
-      }
-      if (item.kind === "audit") return 44;
-      const isLead = item.groupPos === "solo" || item.groupPos === "start";
-      const replyExtra = item.message.replyTo ? 28 : 0;
-      const reactionExtra = (item.message.reactions?.length ?? 0) > 0 ? 28 : 0;
-      const groupGap =
-        item.groupPos === "solo" || item.groupPos === "end" ? 16 : 0;
-      return (isLead ? 112 : 52) + replyExtra + reactionExtra + groupGap;
-    },
-    getItemKey: (index) => {
-      const item = timelineRenderItems[index];
-      if (!item) return `idx-${index}`;
-      if (item.kind === "older-sentinel") return "older-sentinel";
-      if (item.kind === "newer-sentinel") return "newer-sentinel";
-      if (item.kind === "audit") return `audit-${item.auditId}`;
-      return `message-${item.message.id}`;
-    },
-    overscan: 8,
-    useFlushSync: true,
-    directDomUpdates: true,
+    estimateSize,
+    getItemKey,
+    measureElement: measureTimelineElement,
+    overscan: 10,
+    useFlushSync: false,
     anchorTo: "end",
-    followOnAppend: !hasHighlightedMode,
+    followOnAppend: !usesWindowPaging,
     scrollEndThreshold: 80,
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
+  const loadingOlderRef = useRef(false);
 
   const findRenderIndexForMessage = useCallback(
     (messageId: number) =>
@@ -249,14 +366,18 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     const distanceFromBottom =
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
 
-    if (hasHighlightedMode || usesWindowPaging) {
-      if (!windowState || windowPagingDirection) return;
+    if (usesWindowPaging) {
+      if (!windowState || windowPagingDirection || loadingOlderRef.current)
+        return;
 
       if (
         windowState.previousCursor &&
         distanceFromTop <= EDGE_LOAD_THRESHOLD_PX
       ) {
-        void loadWindowPage("older");
+        loadingOlderRef.current = true;
+        void loadWindowPage("older").finally(() => {
+          loadingOlderRef.current = false;
+        });
         return;
       }
       if (
@@ -268,17 +389,25 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
       return;
     }
 
-    if (!didInitialScrollRef.current || isFetchingNextPage || !hasNextPage)
+    if (
+      !didInitialScrollRef.current ||
+      loadingOlderRef.current ||
+      isFetchingNextPage ||
+      !hasNextPage
+    ) {
       return;
+    }
 
     if (distanceFromTop <= EDGE_LOAD_THRESHOLD_PX) {
-      void fetchNextPage();
+      loadingOlderRef.current = true;
+      void Promise.resolve(fetchNextPage()).finally(() => {
+        loadingOlderRef.current = false;
+      });
     }
   }, [
     scrollViewportRef,
     isCentering,
     isSeeking,
-    hasHighlightedMode,
     usesWindowPaging,
     windowState,
     windowPagingDirection,
@@ -303,11 +432,9 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
       let lastDelta: number | null = null;
       let rafId: number | null = null;
 
-      const finalize = (flashOpts?: { flashReplyJump?: boolean }) => {
+      const finalize = () => {
         if (pendingReplyJumpFlashIdRef.current === messageId) {
-          if (flashOpts?.flashReplyJump) {
-            triggerReplyJumpFlashRef.current(messageId);
-          }
+          triggerReplyJumpFlash(messageId);
           pendingReplyJumpFlashIdRef.current = null;
         }
 
@@ -369,7 +496,7 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
         if (Math.abs(delta) <= CENTER_TOLERANCE_PX) {
           stableFrames += 1;
           if (stableFrames >= CENTER_STABLE_FRAMES) {
-            finalize({ flashReplyJump: true });
+            finalize();
             return;
           }
         } else {
@@ -387,7 +514,6 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
 
       rafId = requestAnimationFrame(step);
 
-      // Return cleanup for unmount safety
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
       };
@@ -403,25 +529,18 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
       scrollViewportRef,
       setIsCentering,
       setIsSeeking,
-      triggerReplyJumpFlashRef,
+      triggerReplyJumpFlash,
       updateJumpTargets,
     ],
   );
 
-  // After window seed/replace or page load, re-check edges
+  // Re-check edges once after window data changes (content already at an edge).
+  // Do NOT drive loads off virtual index range — that races prepend anchoring.
   useEffect(() => {
     if (isCentering || isSeeking || !contentReady) return;
     const frameId = requestAnimationFrame(() => maybeLoadEdges());
     return () => cancelAnimationFrame(frameId);
   }, [contentReady, isCentering, isSeeking, maybeLoadEdges, windowState]);
-
-  // Belt-and-braces: virtualizer range change also checks edges
-  const firstVirtualIndex = virtualItems[0]?.index ?? null;
-  const lastVirtualIndex = virtualItems.at(-1)?.index ?? null;
-  useEffect(() => {
-    if (firstVirtualIndex === null || lastVirtualIndex === null) return;
-    maybeLoadEdges();
-  }, [firstVirtualIndex, lastVirtualIndex, maybeLoadEdges]);
 
   // Normal-mode initial bottom pin
   useLayoutEffect(() => {
@@ -476,7 +595,6 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     scrollViewportRef,
   ]);
 
-  // Pending highlight center layout effect
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
@@ -485,10 +603,11 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     if (pendingScrollMessageIdRef.current !== null) {
       if (!centeringRunningRef.current) {
         centeringRunningRef.current = true;
-        cleanupRef.current = finishPendingHighlightScroll(
-          pendingScrollMessageIdRef.current,
-          false,
-        ) ?? null;
+        cleanupRef.current =
+          finishPendingHighlightScroll(
+            pendingScrollMessageIdRef.current,
+            false,
+          ) ?? null;
       }
       return;
     }
@@ -501,7 +620,6 @@ export function useTimelineVirtualizer(opts: UseTimelineVirtualizerOptions) {
     pendingScrollMessageIdRef,
   ]);
 
-  // Cleanup rAF on unmount
   useEffect(() => {
     return () => {
       cleanupRef.current?.();

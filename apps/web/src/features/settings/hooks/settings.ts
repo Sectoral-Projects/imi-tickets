@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  fetchClientPreferences,
   fetchSettings,
   fetchSettingsChannels,
   fetchSettingsForumThreads,
@@ -10,10 +11,19 @@ import {
 } from "../api/settings";
 import type { UpdateSettingsInput } from "../schemas/settings";
 
-export function useSettings() {
+export function useClientPreferences(enabled = true) {
+  return useQuery({
+    queryKey: ["settings", "client-preferences"] as const,
+    queryFn: fetchClientPreferences,
+    enabled,
+  });
+}
+
+export function useSettings(enabled = true) {
   return useQuery({
     queryKey: ["settings"] as const,
     queryFn: fetchSettings,
+    enabled,
   });
 }
 

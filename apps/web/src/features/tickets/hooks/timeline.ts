@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchTimeline } from "../api/timeline";
+import { timelineItemKey } from "../utils/timeline/blocks";
 
 export function useTimeline(ticketId: number, enabled = true) {
   return useInfiniteQuery({
@@ -8,11 +9,22 @@ export function useTimeline(ticketId: number, enabled = true) {
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: Boolean(ticketId) && enabled,
-    select: (data) => ({
-      ...data,
-      items: [...data.pages]
+    select: (data) => {
+      const chronologicalPages = [...data.pages]
         .reverse()
-        .flatMap((page) => [...page.items].reverse()),
-    }),
+        .map((page) => [...page.items].reverse());
+
+      return {
+        ...data,
+        items: chronologicalPages.flat(),
+        // Each page keeps its own visual message groups. When an older page is
+        // prepended, the first row of every existing page stays the same shape.
+        groupBreakBeforeKeys: chronologicalPages
+          .slice(1)
+          .map((page) => page[0])
+          .filter((item) => item !== undefined)
+          .map(timelineItemKey),
+      };
+    },
   });
 }

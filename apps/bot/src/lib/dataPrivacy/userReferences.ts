@@ -7,13 +7,9 @@ export type UserReferenceProfile = {
 	avatarUrls: string[];
 };
 
-const SNOWFLAKE_MIN = BigInt('100000000000000000');
-const SNOWFLAKE_RANGE = BigInt('900000000000000000');
-
+/** Opaque id that cannot collide with a Discord snowflake (digits-only). */
 export function generateAnonymousUserId() {
-	const bytes = randomBytes(8);
-	const value = (BigInt(`0x${bytes.toString('hex')}`) % SNOWFLAKE_RANGE) + SNOWFLAKE_MIN;
-	return value.toString();
+	return `anon_${randomBytes(16).toString('hex')}`;
 }
 
 export function buildUserReferenceProfile(

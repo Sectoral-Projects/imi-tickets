@@ -11,7 +11,7 @@ export default class ChannelPanelForumThreads extends Route {
 		app.get(path, (c) => this.getForumThreads(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async getForumThreads(c: Context<ApiEnv, string, BlankInput>) {
 		const channelId = c.req.query('channelId')?.trim();
 		if (!channelId) {

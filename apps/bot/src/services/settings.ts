@@ -1,4 +1,9 @@
 import { config } from '@/database/sqlite/schema';
+import {
+	normalizeBotPrefix,
+	normalizeWordFilterRules,
+	type WordFilterRule
+} from '@/lib/wordFilter/match';
 import { container } from '@sapphire/framework';
 import { eq } from 'drizzle-orm';
 import { AuditAction, AuditService } from './audit';
@@ -26,6 +31,12 @@ export type AppSettings = {
 	ticketChannelNameTemplate?: string | null;
 	/** When true, ticket transcripts on the site use the Discord channel/post name as the title. */
 	useChannelNameForTranscript?: boolean;
+	/** Sapphire / template staff-command prefix. */
+	commandPrefix?: string;
+	/** Leading marker for private staff notes in ticket channels. */
+	privateMessagePrefix?: string;
+	/** Reject member DMs that hit these terms. */
+	dmWordBlacklist?: WordFilterRule[];
 };
 
 export const TicketOpenButtonMode = {
@@ -75,7 +86,10 @@ const DEFAULT_SETTINGS: AppSettings = {
 	notifyOnNewThread: false,
 	ticketOpenButtonMode: TicketOpenButtonMode.Off,
 	staffTicketOpenProfile: true,
-	forwardTemplateButtonsToStaff: true
+	forwardTemplateButtonsToStaff: true,
+	commandPrefix: ';',
+	privateMessagePrefix: '`',
+	dmWordBlacklist: []
 };
 
 export abstract class SettingsService {
@@ -92,14 +106,20 @@ export abstract class SettingsService {
 		return normalizeAppSettings(merged);
 	}
 
+	static getCommandPrefix(db: DbClient = container.sqlite) {
+		return this.getAppSettings(db).commandPrefix ?? ';';
+	}
+
+	static getPrivateMessagePrefix(db: DbClient = container.sqlite) {
+		return this.getAppSettings(db).privateMessagePrefix ?? '`';
+	}
+
 	static async getView(userId: string | null | undefined, db: DbClient = container.sqlite): Promise<SettingsView> {
 		const row = this.get(db);
 		const manageAccess = userId
-			? await RbacService.authorizeProductAccess(userId, RbacPermission.Manage)
-			: { allowed: false };
-		const adminAccess = userId
 			? await RbacService.authorizeProductAccess(userId, RbacPermission.Admin)
 			: { allowed: false };
+		const adminAccess = manageAccess;
 
 		return {
 			settings: this.getAppSettings(db),
@@ -135,6 +155,8 @@ export abstract class SettingsService {
 			if (input.settings) {
 				applySettingsPatch(nextSettings, input.settings);
 			}
+
+			assertDistinctPrefixes(nextSettings);
 
 			const values = {
 				settings: nextSettings,
@@ -211,6 +233,14 @@ function normalizeForumPostTitle(value: string | null | undefined) {
 	if (value === null || value === undefined) return null;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed.slice(0, 100) : null;
+}
+
+function assertDistinctPrefixes(settings: AppSettings) {
+	const command = settings.commandPrefix ?? ';';
+	const privatePrefix = settings.privateMessagePrefix ?? '`';
+	if (command === privatePrefix) {
+		throw new Error('commandPrefix and privateMessagePrefix must be different');
+	}
 }
 
 function applySettingsPatch(
@@ -291,6 +321,18 @@ function applySettingsPatch(
 	if ('useChannelNameForTranscript' in patch && patch.useChannelNameForTranscript !== undefined) {
 		target.useChannelNameForTranscript = patch.useChannelNameForTranscript;
 	}
+
+	if ('commandPrefix' in patch && patch.commandPrefix !== undefined) {
+		target.commandPrefix = normalizeBotPrefix(patch.commandPrefix, 'commandPrefix');
+	}
+
+	if ('privateMessagePrefix' in patch && patch.privateMessagePrefix !== undefined) {
+		target.privateMessagePrefix = normalizeBotPrefix(patch.privateMessagePrefix, 'privateMessagePrefix');
+	}
+
+	if ('dmWordBlacklist' in patch && patch.dmWordBlacklist !== undefined) {
+		target.dmWordBlacklist = normalizeWordFilterRules(patch.dmWordBlacklist);
+	}
 }
 
 function normalizeAppSettings(settings: AppSettings): AppSettings {
@@ -301,6 +343,15 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
 	}
 
 	normalized.staffRoleAliases = normalizeStaffRoleAliases(normalized.staffRoleAliases ?? []);
+	normalized.commandPrefix = normalizeBotPrefix(normalized.commandPrefix ?? ';', 'commandPrefix');
+	normalized.privateMessagePrefix = normalizeBotPrefix(
+		normalized.privateMessagePrefix ?? '`',
+		'privateMessagePrefix'
+	);
+	normalized.dmWordBlacklist = normalizeWordFilterRules(normalized.dmWordBlacklist ?? []);
+	if ((normalized.commandPrefix ?? ';') === (normalized.privateMessagePrefix ?? '`')) {
+		normalized.privateMessagePrefix = normalized.commandPrefix === '`' ? ';' : '`';
+	}
 
 	if (normalized.ticketChannelNameTemplate !== undefined) {
 		const trimmed = normalized.ticketChannelNameTemplate?.trim();

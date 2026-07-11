@@ -29,6 +29,13 @@ export const modalFieldSchema = z.object({
   minValues: z.number().optional(),
   maxValues: z.number().optional(),
   options: z.array(modalFieldOptionSchema).optional(),
+  wordFilter: z
+    .object({
+      mode: z.enum(["blacklist", "whitelist"]),
+      match: z.enum(["keyword", "exact"]),
+      terms: z.array(z.string().min(1).max(100)).min(1).max(100),
+    })
+    .optional(),
 });
 
 export const modalConfigSchema = z.object({

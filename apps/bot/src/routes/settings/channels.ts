@@ -11,7 +11,7 @@ export default class SettingsChannels extends Route {
 		app.get(path, (c) => this.getChannels(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async getChannels(c: Context<ApiEnv, string, BlankInput>) {
 		const view = await SettingsService.getView(c.get('user')?.id ?? null);
 		if (!view.primaryGuildId) {

@@ -7,6 +7,13 @@ export const staffRoleAliasSchema = z.object({
 
 export type StaffRoleAlias = z.infer<typeof staffRoleAliasSchema>;
 
+export const wordFilterRuleSchema = z.object({
+  term: z.string().min(1).max(100),
+  match: z.enum(["keyword", "exact"]),
+});
+
+export type WordFilterRule = z.infer<typeof wordFilterRuleSchema>;
+
 export const appSettingsSchema = z.object({
   closeAfterMinutes: z.number().positive().optional(),
   autoCloseReminderMinutes: z.number().positive().optional(),
@@ -15,13 +22,14 @@ export const appSettingsSchema = z.object({
   relayStaffTypingToMember: z.boolean().optional(),
   anonymousStaff: z.boolean().optional(),
   staffRoleAliases: z.array(staffRoleAliasSchema).optional(),
-  ticketOpenButtonMode: z
-    .enum(["off", "before_open"])
-    .optional(),
+  ticketOpenButtonMode: z.enum(["off", "before_open"]).optional(),
   staffTicketOpenProfile: z.boolean().optional(),
   forwardTemplateButtonsToStaff: z.boolean().optional(),
   ticketChannelNameTemplate: z.string().max(100).nullable().optional(),
   useChannelNameForTranscript: z.boolean().optional(),
+  commandPrefix: z.string().min(1).max(5).optional(),
+  privateMessagePrefix: z.string().min(1).max(5).optional(),
+  dmWordBlacklist: z.array(wordFilterRuleSchema).optional(),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -104,13 +112,14 @@ export const updateSettingsSchema = z.object({
       relayStaffTypingToMember: z.boolean().optional(),
       anonymousStaff: z.boolean().optional(),
       staffRoleAliases: z.array(staffRoleAliasSchema).optional(),
-      ticketOpenButtonMode: z
-        .enum(["off", "before_open"])
-        .optional(),
+      ticketOpenButtonMode: z.enum(["off", "before_open"]).optional(),
       staffTicketOpenProfile: z.boolean().optional(),
       forwardTemplateButtonsToStaff: z.boolean().optional(),
       ticketChannelNameTemplate: z.string().max(100).nullable().optional(),
       useChannelNameForTranscript: z.boolean().optional(),
+      commandPrefix: z.string().min(1).max(5).optional(),
+      privateMessagePrefix: z.string().min(1).max(5).optional(),
+      dmWordBlacklist: z.array(wordFilterRuleSchema).optional(),
     })
     .partial()
     .optional(),

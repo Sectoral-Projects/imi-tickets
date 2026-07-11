@@ -35,6 +35,11 @@ export type ModalFieldConfig = {
 	minValues?: number;
 	maxValues?: number;
 	options?: ModalFieldOption[];
+	wordFilter?: {
+		mode: 'blacklist' | 'whitelist';
+		match: 'keyword' | 'exact';
+		terms: string[];
+	};
 };
 
 export type ModalConfig = {

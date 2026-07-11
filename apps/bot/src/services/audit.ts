@@ -40,7 +40,10 @@ export const AuditAction = {
 	GdprExported: 'gdpr.exported',
 	GdprAnonymized: 'gdpr.anonymized',
 	GdprErased: 'gdpr.erased',
-	DataBulkDeleted: 'data.bulk_deleted'
+	DataBulkDeleted: 'data.bulk_deleted',
+
+	ParticipantAdded: 'participant.added',
+	ParticipantRemoved: 'participant.removed'
 } as const;
 
 export type AuditActionType = (typeof AuditAction)[keyof typeof AuditAction] | (string & {});

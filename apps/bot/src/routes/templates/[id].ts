@@ -13,7 +13,7 @@ export default class TemplateById extends Route {
 		app.post(`${path}/preview`, (c) => this.previewTemplate(c));
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async getTemplate(c: Context<ApiEnv, string, BlankInput>) {
 		const id = c.req.param('id');
 		if (!id) return c.json({ error: 'Template id is required' }, 400);
@@ -22,7 +22,7 @@ export default class TemplateById extends Route {
 		return c.json(template);
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async updateTemplate(c: Context<ApiEnv, string, BlankInput>) {
 		const body = await c.req.json<UpdateMessageTemplateInput>().catch(() => null);
 		if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
@@ -36,7 +36,7 @@ export default class TemplateById extends Route {
 		}
 	}
 
-	@Protected(['manage'])
+	@Protected(['admin'])
 	async deleteTemplate(c: Context<ApiEnv, string, BlankInput>) {
 		const id = c.req.param('id');
 		if (!id) return c.json({ error: 'Template id is required' }, 400);
@@ -45,7 +45,7 @@ export default class TemplateById extends Route {
 		return c.json({ deleted: true });
 	}
 
-	@Protected()
+	@Protected(['admin'])
 	async previewTemplate(c: Context<ApiEnv, string, BlankInput>) {
 		const body = await c.req.json<{ template?: unknown; vars?: Record<string, unknown> }>().catch(() => null);
 		if (!body || body.template === undefined) return c.json({ error: 'Template is required' }, 400);

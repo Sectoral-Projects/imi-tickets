@@ -1,6 +1,6 @@
 import { Message as RelayMessage } from '@/lib/components/message';
 import { extractRelayContent, type RelayContent } from '@/lib/discord/relayContent';
-import type { StoredReactionEmoji } from '@/lib/discord/reactionEmoji';
+import { reactionEmojiMatches, type StoredReactionEmoji } from '@/lib/discord/reactionEmoji';
 import { StaffTicketOpenProfile } from '@/lib/components/staffTicketOpenProfile';
 import { guildStaffRolePermissions, linkedGuilds } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
@@ -29,9 +29,11 @@ import { TicketService, ParticipantRole } from './ticket';
 import { resolveStaffAuthorLabel } from '@/lib/discord/staffAuthorLabel';
 import { renderTicketChannelName, sanitizeTicketChannelName, usernameSlug } from '@/lib/ticket/channelName';
 import { formatChannelRenameError } from '@/lib/discord/channelRename';
+import { TRANSCRIPT_SYSTEM_AUTHOR_ID } from '@/lib/transcript/systemMessage';
 import { AuditAction, AuditService } from './audit';
 import { RealtimeService } from './realtime';
 import type { DbClient } from './types';
+import type { APIMessageTopLevelComponent } from 'discord.js';
 
 function reactionEmojiResolvable(emoji: MessageReaction['emoji'] | StoredReactionEmoji) {
 	if ('id' in emoji && emoji.id) return String(emoji.id);
@@ -117,10 +119,25 @@ export abstract class TicketChannelService {
 				: openingRelay
 					? await this.buildRelayPayloadFromRelayContent(openingRelay, authorLabel, { disableMentions: true })
 					: await this.buildRelayPayload(openingContent ?? '', authorLabel, { disableMentions: true });
-		const profilePayload = await this.buildStaffOpenProfilePayload(user, routing.guildId, threadId, db);
+		const profilePayload = await this.buildStaffOpenProfilePayload(
+			user,
+			routing.guildId,
+			threadId,
+			db,
+			'Ticket opened by'
+		);
 
 		if (routing.strategy === ChannelStrategy.Forum) {
-			const channelId = await this.createForumPost(guild, routing.parentId, channelName, user, openingPayload, profilePayload);
+			const channelId = await this.createForumPost(
+				guild,
+				routing.parentId,
+				channelName,
+				user,
+				openingPayload,
+				profilePayload,
+				threadId,
+				db
+			);
 			return channelId ? { channelId, name: channelName } : null;
 		}
 
@@ -130,9 +147,51 @@ export abstract class TicketChannelService {
 			channelName,
 			staffRoleIds,
 			openingPayload,
-			profilePayload
+			profilePayload,
+			threadId,
+			db
 		);
 		return channelId ? { channelId, name: channelName } : null;
+	}
+
+	/**
+	 * Posts the staff-only member profile card to an existing ticket channel and
+	 * records it as a System transcript row when the setting is enabled.
+	 */
+	static async postStaffOpenProfile(
+		thread: { id: number; channelId?: string | null },
+		user: User,
+		options: { headingPrefix?: string; executedBy?: string } = {},
+		db: DbClient = container.sqlite
+	) {
+		if (!thread.channelId) return null;
+
+		const routing = this.getPrimaryRouting(db);
+		if (!routing) return null;
+
+		const payload = await this.buildStaffOpenProfilePayload(
+			user,
+			routing.guildId,
+			thread.id,
+			db,
+			options.headingPrefix ?? 'User added'
+		);
+		if (!payload) return null;
+
+		const channel = await container.client.channels.fetch(thread.channelId).catch(() => null);
+		if (!channel?.isTextBased() || !channel.isSendable()) return null;
+
+		const { transcriptContent, ...discordPayload } = payload;
+		const sent = await channel.send(discordPayload);
+		this.recordStaffOpenProfileTranscript(
+			thread.id,
+			thread.channelId,
+			sent.id,
+			transcriptContent,
+			options.executedBy,
+			db
+		);
+		return sent;
 	}
 
 	static async resolveParticipantDmChannel(
@@ -180,7 +239,7 @@ export abstract class TicketChannelService {
 		thread: { id: number; channelId?: string | null; userId: string; hideMemberIdentities?: boolean }
 	): Promise<RelayDelivery[]> {
 		const deliveries: RelayDelivery[] = [];
-		const referencedMessageId = message.reference?.messageId ?? undefined;
+		const referencedMessageId = MessageService.getReferencedDiscordMessageId(message);
 
 		if (thread.channelId) {
 			const channel = await container.client.channels.fetch(thread.channelId).catch(() => null);
@@ -232,7 +291,7 @@ export abstract class TicketChannelService {
 		const payload = await this.buildRelayPayloadFromMessage(message, authorLabel);
 		const deliveries: RelayDelivery[] = [];
 		const participants = TicketService.listUserParticipants(thread.id, db);
-		const referencedMessageId = message.reference?.messageId ?? undefined;
+		const referencedMessageId = MessageService.getReferencedDiscordMessageId(message);
 
 		for (const participant of participants) {
 			const channel = await this.resolveParticipantDmChannel(participant, thread.id, db);
@@ -450,17 +509,18 @@ export abstract class TicketChannelService {
 		}
 	}
 
-	/** Removes this bot's mirrored reaction from linked copies when no humans remain on the source. */
+	/**
+	 * Removes this bot's mirrored reaction from linked Discord copies.
+	 * Caller must confirm no humans remain on the logical message (DB) first —
+	 * checking only the Discord message where someone just removed a reaction
+	 * is wrong for multi-participant tickets.
+	 */
 	static async mirrorReactionRemoveFromLinkedMessages(
 		emoji: MessageReaction['emoji'] | StoredReactionEmoji,
-		sourceMessage: Message,
 		targets: { targetChannelId: string; targetMessageId: string }[]
 	) {
 		const botId = container.client.user?.id;
 		if (!botId) return;
-
-		const humansRemain = await this.hasRemainingHumanReactors(sourceMessage, emoji, botId);
-		if (humansRemain !== false) return;
 
 		const reactionIdentifier = reactionEmojiResolvable(emoji);
 		if (!reactionIdentifier) return;
@@ -478,45 +538,17 @@ export abstract class TicketChannelService {
 			});
 			if (!relayMessage) continue;
 
-			const reaction = relayMessage.reactions.resolve(reactionIdentifier);
+			const reaction =
+				relayMessage.reactions.resolve(reactionIdentifier) ??
+				relayMessage.reactions.cache.find((entry) =>
+					reactionEmojiMatches(entry.emoji, emoji as StoredReactionEmoji)
+				);
 			if (!reaction) continue;
 
 			await reaction.users.remove(botId).catch((error) => {
 				container.logger.warn(`Failed to remove mirrored reaction from message ${target.targetMessageId}`, error);
 			});
 		}
-	}
-
-	/**
-	 * Whether any non-bot user still has this emoji on the source message.
-	 * Returns null when Discord state could not be read (caller should not mirror-remove).
-	 */
-	private static async hasRemainingHumanReactors(
-		sourceMessage: Message,
-		emoji: MessageReaction['emoji'] | StoredReactionEmoji,
-		botId: string
-	): Promise<boolean | null> {
-		const freshMessage = await sourceMessage.fetch().catch(() => sourceMessage);
-		const reactionIdentifier = reactionEmojiResolvable(emoji);
-		if (!reactionIdentifier) return null;
-
-		for (const [, partialReaction] of freshMessage.reactions.cache) {
-			if (partialReaction.partial) {
-				await partialReaction.fetch().catch(() => undefined);
-			}
-		}
-
-		const sourceReaction = freshMessage.reactions.resolve(reactionIdentifier);
-		if (!sourceReaction) return false;
-
-		const users = await sourceReaction.users.fetch().catch(() => null);
-		if (!users) return null;
-
-		for (const [, reactor] of users) {
-			if (reactor.id !== botId) return true;
-		}
-
-		return false;
 	}
 
 	static async deleteStaffChannel(channelId: string) {
@@ -607,8 +639,9 @@ export abstract class TicketChannelService {
 		user: User,
 		primaryGuildId: string,
 		threadId: number | undefined,
-		db: DbClient
-	): Promise<MessageCreateOptions | null> {
+		db: DbClient,
+		headingPrefix: string
+	): Promise<(MessageCreateOptions & { components: APIMessageTopLevelComponent[]; transcriptContent: string }) | null> {
 		const settings = SettingsService.getAppSettings(db);
 		if (settings.staffTicketOpenProfile === false) return null;
 
@@ -617,21 +650,63 @@ export abstract class TicketChannelService {
 		const primaryGuild = await container.client.guilds.fetch(primaryGuildId).catch(() => null);
 		const primaryMember = primaryGuild ? await primaryGuild.members.fetch(user.id).catch(() => null) : null;
 		const mutualServers = await this.resolveLinkedMutualServers(user.id, linkedGuilds, primaryGuild);
+		const userMention = `<@${user.id}>`;
+		const displayName = primaryMember?.displayName ?? user.globalName ?? user.username;
+		const roleMentions = primaryMember ? formatRoleMentions(primaryMember) : 'None';
+		const roleNames = primaryMember ? formatRoleNames(primaryMember) : 'None';
+		const mutual = formatList(mutualServers, 'None');
+		const accountCreatedAt = time(user.createdAt, 'F');
+		const joinedMainGuildAt = primaryMember?.joinedAt ? time(primaryMember.joinedAt, 'F') : 'Not in main server';
+		const previousTicketCount = TicketService.countTicketsForUser(user.id, threadId, db);
+
 		const components = await StaffTicketOpenProfile.render({
-			userMention: `<@${user.id}>`,
-			accountCreatedAt: time(user.createdAt, 'F'),
-			joinedMainGuildAt: primaryMember?.joinedAt ? time(primaryMember.joinedAt, 'F') : 'Not in main server',
-			previousTicketCount: TicketService.countTicketsForUser(user.id, threadId, db),
+			heading: `${headingPrefix} ${userMention}`,
+			userMention,
+			accountCreatedAt,
+			joinedMainGuildAt,
+			previousTicketCount,
 			nickname: primaryMember?.nickname ?? 'None',
-			roles: primaryMember ? formatRoles(primaryMember) : 'None',
-			mutualServers: formatList(mutualServers, 'None')
+			roles: roleMentions,
+			mutualServers: mutual
 		});
+
+		const transcriptContent = [
+			`# ${headingPrefix} [${displayName}](https://discord.com/users/${user.id})`,
+			`**Account created:** ${accountCreatedAt}`,
+			`**Joined main server:** ${joinedMainGuildAt}`,
+			`**Previous tickets:** ${previousTicketCount}`,
+			`**Main server nickname:** ${primaryMember?.nickname ?? 'None'}`,
+			`**Main server roles:** ${roleNames}`,
+			`**Mutual linked servers:** ${mutual}`
+		].join('\n\n');
 
 		return {
 			components,
 			flags: MessageFlags.IsComponentsV2,
-			allowedMentions: DISABLED_MENTIONS
+			allowedMentions: DISABLED_MENTIONS,
+			transcriptContent
 		};
+	}
+
+	private static recordStaffOpenProfileTranscript(
+		threadId: number,
+		staffChannelId: string,
+		discordMessageId: string,
+		transcriptContent: string,
+		executedBy: string | undefined,
+		_db: DbClient
+	) {
+		const content = transcriptContent.trim();
+		if (!content) return;
+
+		MessageService.create({
+			threadId,
+			channelId: staffChannelId,
+			authorId: TRANSCRIPT_SYSTEM_AUTHOR_ID,
+			messageId: discordMessageId,
+			content,
+			executedBy: executedBy ?? TRANSCRIPT_SYSTEM_AUTHOR_ID
+		});
 	}
 
 	private static async resolveLinkedMutualServers(
@@ -663,15 +738,38 @@ export abstract class TicketChannelService {
 		name: string,
 		user: User,
 		openingPayload: Awaited<ReturnType<typeof TicketChannelService.buildRelayPayload>> | null,
-		profilePayload: Awaited<ReturnType<typeof TicketChannelService.buildStaffOpenProfilePayload>>
+		profilePayload: Awaited<ReturnType<typeof TicketChannelService.buildStaffOpenProfilePayload>>,
+		threadId: number | undefined,
+		db: DbClient
 	) {
 		const forum = await guild.channels.fetch(forumChannelId).catch(() => null);
 		if (!forum || forum.type !== ChannelType.GuildForum) return null;
 
+		const forumMessage = profilePayload
+			? (() => {
+					const { transcriptContent: _, ...discordPayload } = profilePayload;
+					return discordPayload;
+				})()
+			: (openingPayload ?? { content: `Ticket opened for ${user.tag}` });
+
 		const post = await forum.threads.create({
 			name,
-			message: profilePayload ?? openingPayload ?? { content: `Ticket opened for ${user.tag}` }
+			message: forumMessage
 		});
+
+		if (profilePayload && threadId) {
+			const starter = await post.fetchStarterMessage().catch(() => null);
+			if (starter) {
+				this.recordStaffOpenProfileTranscript(
+					threadId,
+					post.id,
+					starter.id,
+					profilePayload.transcriptContent,
+					undefined,
+					db
+				);
+			}
+		}
 
 		if (profilePayload && openingPayload) {
 			await post.send(openingPayload);
@@ -686,7 +784,9 @@ export abstract class TicketChannelService {
 		name: string,
 		staffRoleIds: string[],
 		openingPayload: Awaited<ReturnType<typeof TicketChannelService.buildRelayPayload>> | null,
-		profilePayload: Awaited<ReturnType<typeof TicketChannelService.buildStaffOpenProfilePayload>>
+		profilePayload: Awaited<ReturnType<typeof TicketChannelService.buildStaffOpenProfilePayload>>,
+		threadId: number | undefined,
+		db: DbClient
 	) {
 		const category = await guild.channels.fetch(categoryId).catch(() => null);
 		if (!category || category.type !== ChannelType.GuildCategory) return null;
@@ -717,7 +817,18 @@ export abstract class TicketChannelService {
 		});
 
 		if (profilePayload) {
-			await channel.send(profilePayload);
+			const { transcriptContent, ...discordPayload } = profilePayload;
+			const sent = await channel.send(discordPayload);
+			if (threadId) {
+				this.recordStaffOpenProfileTranscript(
+					threadId,
+					channel.id,
+					sent.id,
+					transcriptContent,
+					undefined,
+					db
+				);
+			}
 		}
 		if (openingPayload) {
 			await channel.send(openingPayload);
@@ -727,11 +838,20 @@ export abstract class TicketChannelService {
 	}
 }
 
-function formatRoles(member: GuildMember) {
+function formatRoleMentions(member: GuildMember) {
 	const roles = [...member.roles.cache.values()]
 		.filter((role) => role.id !== member.guild.id)
 		.sort((a: Role, b: Role) => b.position - a.position)
 		.map((role) => `<@&${role.id}>`);
+
+	return formatList(roles, 'None', 12);
+}
+
+function formatRoleNames(member: GuildMember) {
+	const roles = [...member.roles.cache.values()]
+		.filter((role) => role.id !== member.guild.id)
+		.sort((a: Role, b: Role) => b.position - a.position)
+		.map((role) => role.name);
 
 	return formatList(roles, 'None', 12);
 }

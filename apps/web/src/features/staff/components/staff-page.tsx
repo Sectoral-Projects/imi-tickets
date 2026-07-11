@@ -38,6 +38,8 @@ import {
   parseStaffFilters,
   type StaffDateRange,
 } from "../utils/staff-filters";
+import { UnauthorizedScreen } from "@/components/unauthorized-screen";
+import { ApiError } from "@/lib/api";
 import { StaffDateRangePicker } from "./staff-date-range-picker";
 import {
   StaffChartSkeleton,
@@ -426,6 +428,8 @@ export function StaffContent() {
 
       {isInitialLoad ? (
         <StaffMemberCardsSkeleton />
+      ) : error instanceof ApiError && error.code === "FORBIDDEN" ? (
+        <UnauthorizedScreen description="You need the Read permission to view staff analytics." />
       ) : error ? (
         <div className="text-sm text-muted-foreground">Error: {error.message}</div>
       ) : !data || data.staff.length === 0 ? (
