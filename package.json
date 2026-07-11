@@ -1,0 +1,20 @@
+{
+  "name": "imi-tickets",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Discord modmail with a staff web UI",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:bot": "pnpm --filter @imi/tickets-bot watch:start",
+    "dev:web": "pnpm --filter @imi/tickets-web dev",
+    "build": "pnpm --filter @imi/tickets-shared build && pnpm --filter @imi/tickets-bot build && pnpm --filter @imi/tickets-web build",
+    "build:bot": "pnpm --filter @imi/tickets-shared build && pnpm --filter @imi/tickets-bot build",
+    "build:web": "pnpm --filter @imi/tickets-shared build && pnpm --filter @imi/tickets-web build",
+    "test": "pnpm --filter @imi/tickets-shared test",
+    "format": "pnpm --filter @imi/tickets-bot format",
+    "db:migrate": "pnpm --filter @imi/tickets-bot db:migrate",
+    "db:push": "pnpm --filter @imi/tickets-bot db:push",
+    "db:generate": "pnpm --filter @imi/tickets-bot db:generate"
+  }
+}

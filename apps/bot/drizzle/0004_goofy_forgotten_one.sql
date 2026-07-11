@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `auto_close_reminder_for_last_message_at` integer;

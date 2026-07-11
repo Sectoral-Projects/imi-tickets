@@ -1,0 +1,146 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783134196859,
+      "tag": "0000_dizzy_masked_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783348121287,
+      "tag": "0001_low_the_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783449700720,
+      "tag": "0002_cuddly_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1783460357429,
+      "tag": "0003_tidy_power_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1783461509127,
+      "tag": "0004_goofy_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1783483239459,
+      "tag": "0005_complex_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783531839568,
+      "tag": "0006_strange_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1783600000000,
+      "tag": "0007_button_modals",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783603600000,
+      "tag": "0008_modal_template_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783607200000,
+      "tag": "0009_parallel_titanium_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783607300000,
+      "tag": "0010_forwarded_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1783609000000,
+      "tag": "0011_multi_user_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1783610500000,
+      "tag": "0012_member_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1783612100000,
+      "tag": "0013_template_staff_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1783700000000,
+      "tag": "0014_channel_ticket_panel",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1783800000000,
+      "tag": "0015_message_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1783900000000,
+      "tag": "0016_ticket_channel_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1784000000000,
+      "tag": "0017_staff_channel_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1784100000000,
+      "tag": "0018_message_private_staff",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1784200000000,
+      "tag": "0019_message_replies_reactions",
+      "breakpoints": true
+    }
+  ]
+}

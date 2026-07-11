@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `relay_message_id` text;

@@ -1,0 +1,31 @@
+﻿# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Environment / secrets (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# SQLite / local data (app uses journal_mode=DELETE → single *.db file)
+*.db
+data/
+
+# Nested lockfiles (monorepo uses root pnpm-lock.yaml only)
+apps/*/pnpm-lock.yaml
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Local Vite / tooling
+*.local
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

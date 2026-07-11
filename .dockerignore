@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.env
+.env.*
+data
+*.db
+*.log
+.DS_Store
+Thumbs.db
+.vscode
+apps/*/pnpm-lock.yaml
