@@ -1,8 +1,10 @@
 import type { ChannelOpenButtonDraft, DmOpenButtonDraft } from "../schemas/templates";
 import {
+  normalizeMessageDelivery,
   resolveEmbeddedButtonCustomId,
   TEMPLATE_MODAL_BUTTON_CUSTOM_ID_PREFIX,
 } from "./button-actions";
+import { DEFAULT_BUTTON_MESSAGE_DELIVERY } from "../schemas/button-actions";
 
 export const TICKET_OPEN_PROMPT_TEMPLATE_ID = "ticket-open-prompt";
 export const TICKET_CHANNEL_PANEL_TEMPLATE_ID = "ticket-channel-panel";
@@ -24,6 +26,8 @@ export type BuilderButtonItem = {
   optionalTag: string;
   subjectTemplate: string;
   enabled: boolean;
+  messageDelivery: import("../schemas/button-actions").ButtonMessageDelivery;
+  closeTicketOnPress: boolean;
 };
 
 export type BuilderItem = BuilderTextItem | BuilderButtonItem;
@@ -102,6 +106,8 @@ export function createButtonItem(
     optionalTag: partial.optionalTag ?? "",
     subjectTemplate: partial.subjectTemplate ?? "",
     enabled: partial.enabled ?? true,
+    messageDelivery: partial.messageDelivery ?? DEFAULT_BUTTON_MESSAGE_DELIVERY,
+    closeTicketOnPress: partial.closeTicketOnPress ?? false,
   };
 }
 
@@ -275,9 +281,11 @@ export function builderStatesEqual(a: BuilderState, b: BuilderState) {
         item.modalTemplateId === other.modalTemplateId &&
         item.optionalTag === other.optionalTag &&
         item.subjectTemplate === other.subjectTemplate &&
-        item.enabled === other.enabled
+        item.enabled === other.enabled &&
+        item.messageDelivery === other.messageDelivery &&
+        item.closeTicketOnPress === other.closeTicketOnPress
       );
-    }
+   }
 
     return false;
   });
@@ -393,8 +401,15 @@ function parseItemsFromTemplate(
           buttonId = separator > 0 ? rest.slice(separator + 1) : rest;
           actionType = "modal";
         } else if (customId.startsWith(TEMPLATE_BUTTON_CUSTOM_ID_PREFIX)) {
-          templateId = customId.slice(TEMPLATE_BUTTON_CUSTOM_ID_PREFIX.length);
-          buttonId = templateId;
+          const rest = customId.slice(TEMPLATE_BUTTON_CUSTOM_ID_PREFIX.length);
+          const separator = rest.indexOf(":");
+          if (separator > 0) {
+            buttonId = rest.slice(separator + 1);
+          } else {
+            // Legacy msg_btn:<linkedTemplateId>
+            templateId = rest;
+            buttonId = rest;
+          }
         }
 
         const savedAction = buttonActions?.[buttonId];
@@ -406,6 +421,8 @@ function parseItemsFromTemplate(
             templateId: savedAction?.templateId ?? templateId,
             modalTemplateId: savedAction?.modalTemplateId ?? "",
             enabled: true,
+            messageDelivery: normalizeMessageDelivery(savedAction?.messageDelivery),
+            closeTicketOnPress: Boolean(savedAction?.closeTicketOnPress),
           }),
         );
       }

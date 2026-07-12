@@ -1,20 +1,34 @@
-import type { ButtonActionConfig, ModalConfig, ModalFieldConfig, ModalFieldOption } from './types';
-import { ButtonActionType, ModalFieldType } from './types';
+import type {
+	ButtonActionConfig,
+	ButtonMessageDelivery,
+	ModalConfig,
+	ModalFieldConfig,
+	ModalFieldOption
+} from './types';
+import { ButtonActionType, ButtonMessageDelivery as Delivery, ModalFieldType } from './types';
 import { normalizeFieldWordFilter } from '@/lib/wordFilter/match';
 
 const FIELD_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
 const MAX_MODAL_FIELDS = 5;
 const MAX_OPTIONS = 25;
 
+const MESSAGE_DELIVERY_VALUES = new Set<string>(Object.values(Delivery));
+
 export function normalizeButtonActionConfig(input: ButtonActionConfig): ButtonActionConfig {
 	const actionType = input.actionType === ButtonActionType.Modal ? ButtonActionType.Modal : ButtonActionType.Message;
 	const templateId = normalizeOptionalId(input.templateId);
+	const closeTicketOnPress = Boolean(input.closeTicketOnPress);
+	const messageDelivery = normalizeMessageDelivery(input.messageDelivery, Boolean(templateId));
 
 	if (actionType === ButtonActionType.Message) {
-		if (!templateId) {
+		if (!templateId && !closeTicketOnPress) {
 			throw new Error('Linked template is required for message buttons');
 		}
-		return { actionType, templateId };
+		return {
+			actionType,
+			...(templateId ? { templateId, messageDelivery } : {}),
+			...(closeTicketOnPress ? { closeTicketOnPress: true } : {})
+		};
 	}
 
 	const modalTemplateId = normalizeOptionalId(input.modalTemplateId);
@@ -25,9 +39,10 @@ export function normalizeButtonActionConfig(input: ButtonActionConfig): ButtonAc
 
 	return {
 		actionType,
-		templateId,
+		...(templateId ? { templateId, messageDelivery } : {}),
 		modalTemplateId,
-		modal: modal ?? undefined
+		modal: modal ?? undefined,
+		...(closeTicketOnPress ? { closeTicketOnPress: true } : {})
 	};
 }
 
@@ -59,6 +74,17 @@ export function normalizeModalConfig(input: ModalConfig | null | undefined): Mod
 	if (fields.length === 0) throw new Error('Modal must include at least one field');
 
 	return { title, fields };
+}
+
+function normalizeMessageDelivery(
+	value: ButtonMessageDelivery | string | null | undefined,
+	hasLinkedTemplate: boolean
+): ButtonMessageDelivery | undefined {
+	if (!hasLinkedTemplate) return undefined;
+	if (typeof value === 'string' && MESSAGE_DELIVERY_VALUES.has(value)) {
+		return value as ButtonMessageDelivery;
+	}
+	return Delivery.PresserAndStaff;
 }
 
 function normalizeModalField(field: ModalFieldConfig): ModalFieldConfig {

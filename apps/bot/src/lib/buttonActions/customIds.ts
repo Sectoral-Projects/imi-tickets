@@ -3,8 +3,35 @@ export const TemplateModalButtonCustomIdPrefix = 'msg_modal:';
 export const ModalSubmitCustomIdPrefix = 'modal_submit:';
 export const ModalRetryCustomIdPrefix = 'modal_retry:';
 
+/** @deprecated Prefer buildEmbeddedMessageButtonCustomId for embedded buttons. */
 export function buildMessageButtonCustomId(templateId: string) {
 	return `${TemplateButtonCustomIdPrefix}${templateId}`;
+}
+
+export function buildEmbeddedMessageButtonCustomId(templateId: string, buttonId: string) {
+	return `${TemplateButtonCustomIdPrefix}${templateId}:${buttonId}`;
+}
+
+/**
+ * Parses embedded message button custom ids.
+ * - New: `msg_btn:<parentTemplateId>:<buttonId>`
+ * - Legacy: `msg_btn:<linkedTemplateId>` (no button config lookup)
+ */
+export function parseEmbeddedMessageButtonCustomId(customId: string) {
+	if (!customId.startsWith(TemplateButtonCustomIdPrefix)) return null;
+	const rest = customId.slice(TemplateButtonCustomIdPrefix.length).trim();
+	if (!rest) return null;
+
+	const separator = rest.indexOf(':');
+	if (separator <= 0) {
+		return { kind: 'legacy' as const, linkedTemplateId: rest };
+	}
+
+	const templateId = rest.slice(0, separator).trim();
+	const buttonId = rest.slice(separator + 1).trim();
+	if (!templateId || !buttonId) return null;
+
+	return { kind: 'embedded' as const, templateId, buttonId };
 }
 
 export function buildEmbeddedModalButtonCustomId(templateId: string, buttonId: string) {

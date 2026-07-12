@@ -1,7 +1,28 @@
 import type { BuilderButtonItem } from "./component-v2";
-import type { ButtonActionConfig } from "../schemas/button-actions";
+import type {
+  ButtonActionConfig,
+  ButtonMessageDelivery,
+} from "../schemas/button-actions";
+import { DEFAULT_BUTTON_MESSAGE_DELIVERY } from "../schemas/button-actions";
 
 export const TEMPLATE_MODAL_BUTTON_CUSTOM_ID_PREFIX = "msg_modal:";
+export const TEMPLATE_BUTTON_CUSTOM_ID_PREFIX = "msg_btn:";
+
+function deliveryFields(
+  item: BuilderButtonItem,
+  hasLinkedTemplate: boolean,
+): Pick<ButtonActionConfig, "messageDelivery" | "closeTicketOnPress"> {
+  const fields: Pick<ButtonActionConfig, "messageDelivery" | "closeTicketOnPress"> =
+    {};
+  if (hasLinkedTemplate) {
+    fields.messageDelivery =
+      item.messageDelivery ?? DEFAULT_BUTTON_MESSAGE_DELIVERY;
+  }
+  if (item.closeTicketOnPress) {
+    fields.closeTicketOnPress = true;
+  }
+  return fields;
+}
 
 export function extractEmbeddedButtonActions(
   items: BuilderButtonItem[],
@@ -14,18 +35,30 @@ export function extractEmbeddedButtonActions(
     if (item.actionType === "modal") {
       const modalTemplateId = item.modalTemplateId.trim();
       if (!modalTemplateId) continue;
+      const templateId = item.templateId.trim() || undefined;
       actions[item.buttonId.trim()] = {
         actionType: "modal",
         modalTemplateId,
-        templateId: item.templateId.trim() || undefined,
+        templateId,
+        ...deliveryFields(item, Boolean(templateId)),
       };
       continue;
     }
 
-    if (item.templateId.trim()) {
+    const templateId = item.templateId.trim();
+    if (templateId) {
       actions[item.buttonId.trim()] = {
         actionType: "message",
-        templateId: item.templateId.trim(),
+        templateId,
+        ...deliveryFields(item, true),
+      };
+      continue;
+    }
+
+    if (item.closeTicketOnPress) {
+      actions[item.buttonId.trim()] = {
+        actionType: "message",
+        closeTicketOnPress: true,
       };
     }
   }
@@ -42,12 +75,27 @@ export function resolveEmbeddedButtonCustomId(
     return `${TEMPLATE_MODAL_BUTTON_CUSTOM_ID_PREFIX}${parentTemplateId}:${buttonId}`;
   }
 
-  const templateId = button.templateId.trim();
-  if (templateId) {
-    return `msg_btn:${templateId}`;
+  // Message / close side-effect buttons always encode parent + button id so
+  // runtime can load buttonActions (delivery + close flags).
+  if (button.templateId.trim() || button.closeTicketOnPress) {
+    return `${TEMPLATE_BUTTON_CUSTOM_ID_PREFIX}${parentTemplateId}:${buttonId}`;
   }
 
   return buttonId;
+}
+
+export function normalizeMessageDelivery(
+  value: string | null | undefined,
+): ButtonMessageDelivery {
+  switch (value) {
+    case "presser":
+    case "presser_and_staff":
+    case "presser_and_participants":
+    case "presser_staff_and_participants":
+      return value;
+    default:
+      return DEFAULT_BUTTON_MESSAGE_DELIVERY;
+  }
 }
 
 export { createDefaultModalConfig, createDefaultModalField } from "./modal-v2";

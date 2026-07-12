@@ -9,6 +9,7 @@ import {
 	buildEmbeddedModalRetryCustomId,
 	buildEmbeddedModalSubmitCustomId,
 	ModalRetryCustomIdPrefix,
+	parseEmbeddedMessageButtonCustomId,
 	parseEmbeddedModalButtonCustomId,
 	parseModalRetryCustomId,
 	parseModalSubmitCustomId,
@@ -17,7 +18,13 @@ import {
 import { replyChannelPanelTicketAck } from '@/lib/discord/channelPanelAck';
 import { buildDiscordModal } from '@/lib/buttonActions/modalBuilder';
 import { extractModalTemplateVariables } from '@/lib/buttonActions/modalValues';
-import { ButtonActionType } from '@/lib/buttonActions/types';
+import {
+	ButtonActionType,
+	DEFAULT_BUTTON_MESSAGE_DELIVERY,
+	type ButtonMessageDelivery
+} from '@/lib/buttonActions/types';
+import { Closed } from '@/lib/components/closed';
+import { NotFound } from '@/lib/components/notFound';
 import {
 	replyModalWordFilterReject,
 	showModalRetryError,
@@ -33,6 +40,7 @@ import { MessageTemplateService } from '@/services/messageTemplate';
 import { PendingTicketService } from '@/services/pendingTicket';
 import { SettingsService } from '@/services/settings';
 import { TemplateButtonCustomIdPrefix, TemplateButtonService } from '@/services/templateButton';
+import { TicketCloseService } from '@/services/ticketClose';
 import { TicketOpenService } from '@/services/ticketOpen';
 import { TicketService } from '@/services/ticket';
 import { ApplyOptions } from '@sapphire/decorators';
@@ -87,10 +95,7 @@ export class InteractionCreateListener extends Listener {
 		}
 
 		if (interaction.customId.startsWith(TemplateButtonCustomIdPrefix)) {
-			await this.handleTemplateButton(
-				interaction,
-				interaction.customId.slice(TemplateButtonCustomIdPrefix.length)
-			);
+			await this.handleTemplateButton(interaction, interaction.customId);
 		}
 	}
 
@@ -279,8 +284,88 @@ export class InteractionCreateListener extends Listener {
 		);
 	}
 
-	private async handleTemplateButton(interaction: ButtonInteraction, templateId: string) {
-		const trimmedId = templateId.trim();
+	private async handleTemplateButton(interaction: ButtonInteraction, customId: string) {
+		const parsed = parseEmbeddedMessageButtonCustomId(customId);
+		if (!parsed) {
+			await interaction.reply({
+				content: 'That option is no longer available.',
+				ephemeral: interaction.inGuild()
+			});
+			return;
+		}
+
+		if (parsed.kind === 'legacy') {
+			await this.handleLegacyTemplateButton(interaction, parsed.linkedTemplateId);
+			return;
+		}
+
+		const action = ButtonActionService.getEmbedded(parsed.templateId, parsed.buttonId);
+		if (!action || (action.actionType !== ButtonActionType.Message && action.actionType !== ButtonActionType.Modal)) {
+			await interaction.reply({
+				content: 'That option is no longer available.',
+				ephemeral: interaction.inGuild()
+			});
+			return;
+		}
+
+		if (action.actionType === ButtonActionType.Modal) {
+			await interaction.reply({
+				content: 'That option is no longer available.',
+				ephemeral: interaction.inGuild()
+			});
+			return;
+		}
+
+		const linkedTemplateId = action.templateId?.trim() || '';
+		const closeTicketOnPress = Boolean(action.closeTicketOnPress);
+
+		if (!linkedTemplateId && !closeTicketOnPress) {
+			await interaction.reply({
+				content: 'That option is no longer available.',
+				ephemeral: interaction.inGuild()
+			});
+			return;
+		}
+
+		const thread = TemplateButtonService.resolveOpenThreadForInteraction(interaction);
+		let replied = false;
+
+		if (linkedTemplateId) {
+			let components;
+			try {
+				components = TemplateButtonService.renderForUser(linkedTemplateId, interaction.user);
+			} catch {
+				await interaction.reply({
+					content: 'That template is not configured.',
+					ephemeral: interaction.inGuild()
+				});
+				return;
+			}
+
+			await interaction.reply({
+				components,
+				flags: [MessageFlags.IsComponentsV2]
+			});
+			replied = true;
+
+			await TemplateButtonService.deliverEmbeddedMessage(linkedTemplateId, interaction.user, {}, {
+				messageDelivery: action.messageDelivery,
+				presserUserId: interaction.user.id,
+				threadId: thread?.id,
+				staffChannelId: thread?.channelId,
+				skipChannelId: interaction.channelId,
+				executedBy: interaction.user.id
+			});
+		}
+
+		if (closeTicketOnPress) {
+			await this.applyCloseTicketSideEffect(interaction, thread, replied);
+			return;
+		}
+	}
+
+	private async handleLegacyTemplateButton(interaction: ButtonInteraction, linkedTemplateId: string) {
+		const trimmedId = linkedTemplateId.trim();
 		if (!trimmedId) {
 			await interaction.reply({
 				content: 'That option is no longer available.',
@@ -314,13 +399,62 @@ export class InteractionCreateListener extends Listener {
 			flags: [MessageFlags.IsComponentsV2]
 		});
 
-		const settings = SettingsService.getAppSettings();
-		if (settings.forwardTemplateButtonsToStaff === false) return;
+		const thread = TemplateButtonService.resolveOpenThreadForInteraction(interaction);
+		await TemplateButtonService.deliverEmbeddedMessage(trimmedId, interaction.user, {}, {
+			messageDelivery: DEFAULT_BUTTON_MESSAGE_DELIVERY,
+			presserUserId: interaction.user.id,
+			threadId: thread?.id,
+			staffChannelId: thread?.channelId,
+			skipChannelId: interaction.channelId,
+			executedBy: interaction.user.id
+		});
+	}
 
-		const thread = TicketService.findOpenThreadForUser(interaction.user.id);
-		if (thread?.channelId) {
-			await TemplateButtonService.forwardToStaff(thread.channelId, trimmedId, interaction.user);
+	private async applyCloseTicketSideEffect(
+		interaction: ButtonInteraction | ModalSubmitInteraction,
+		thread: ReturnType<typeof TemplateButtonService.resolveOpenThreadForInteraction>,
+		alreadyReplied: boolean
+	) {
+		const ephemeral = interaction.inGuild();
+		const send = async (payload: {
+			content?: string;
+			components?: Awaited<ReturnType<typeof Closed.render>>;
+		}) => {
+			const flags = payload.components
+				? ephemeral
+					? ([MessageFlags.IsComponentsV2, MessageFlags.Ephemeral] as const)
+					: ([MessageFlags.IsComponentsV2] as const)
+				: ephemeral
+					? ([MessageFlags.Ephemeral] as const)
+					: undefined;
+
+			if (alreadyReplied) {
+				await interaction.followUp({
+					...payload,
+					...(flags ? { flags } : {})
+				});
+				return;
+			}
+
+			await interaction.reply({
+				...payload,
+				...(flags ? { flags } : {})
+			});
+		};
+
+		if (!thread) {
+			await send({ components: await NotFound.render() });
+			return;
 		}
+
+		const skipMemberDm = !interaction.inGuild();
+		await TicketCloseService.close({
+			threadId: thread.id,
+			executedBy: interaction.user.id,
+			skipMemberDm
+		});
+
+		await send({ components: await Closed.render() });
 	}
 
 	private async handleModalSubmit(interaction: ModalSubmitInteraction) {
@@ -499,18 +633,27 @@ export class InteractionCreateListener extends Listener {
 			return;
 		}
 
-		const settings = SettingsService.getAppSettings();
-		const thread = TicketService.findOpenThreadForUser(interaction.user.id);
+		const thread = TemplateButtonService.resolveOpenThreadForInteraction(interaction);
 
 		await this.replyWithOptionalTemplate(
 			interaction,
 			action.templateId,
 			interaction.user,
 			modalVars,
-			settings,
+			SettingsService.getAppSettings(),
 			thread?.channelId,
-			true
+			true,
+			{
+				messageDelivery: action.messageDelivery,
+				threadId: thread?.id ?? null,
+				presserUserId: interaction.user.id,
+				skipChannelId: interaction.channelId
+			}
 		);
+
+		if (action.closeTicketOnPress) {
+			await this.applyCloseTicketSideEffect(interaction, thread, true);
+		}
 	}
 
 	private async handleModalRetry(interaction: ButtonInteraction) {
@@ -595,7 +738,13 @@ export class InteractionCreateListener extends Listener {
 		extraVars: Record<string, unknown>,
 		settings: ReturnType<typeof SettingsService.getAppSettings>,
 		staffChannelId?: string | null,
-		modalResponse = false
+		modalResponse = false,
+		embeddedDelivery?: {
+			messageDelivery?: ButtonMessageDelivery | null;
+			threadId?: number | null;
+			presserUserId: string;
+			skipChannelId?: string | null;
+		}
 	) {
 		if (templateId) {
 			try {
@@ -605,7 +754,17 @@ export class InteractionCreateListener extends Listener {
 					flags: [MessageFlags.IsComponentsV2]
 				});
 
-				if (settings.forwardTemplateButtonsToStaff !== false && staffChannelId) {
+				if (embeddedDelivery) {
+					await TemplateButtonService.deliverEmbeddedMessage(templateId, user, extraVars, {
+						messageDelivery: embeddedDelivery.messageDelivery,
+						presserUserId: embeddedDelivery.presserUserId,
+						threadId: embeddedDelivery.threadId,
+						staffChannelId,
+						skipChannelId: embeddedDelivery.skipChannelId ?? interaction.channelId,
+						modalResponse,
+						executedBy: user.id
+					});
+				} else if (settings.forwardTemplateButtonsToStaff !== false && staffChannelId) {
 					await TemplateButtonService.forwardToStaff(staffChannelId, templateId, user, extraVars, {
 						modalResponse,
 						executedBy: user.id

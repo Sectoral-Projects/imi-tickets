@@ -24,6 +24,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { SearchableSelect } from "@/components/searchable-select";
 import { useDeleteTemplate, useTemplates } from "../hooks/templates";
 import type { ChannelOpenButtonDraft, DmOpenButtonDraft } from "../schemas/templates";
 import {
@@ -100,6 +101,18 @@ export function TemplatesSettingsSection({
         (template) => template.kind === "custom" || template.template !== null,
       ),
     [messageTemplates],
+  );
+
+  const templateSelectOptions = useMemo(
+    () =>
+      templates.map((template) => ({
+        value: template.id,
+        label: isModalTemplate(template)
+          ? `${template.name} (Modal)`
+          : template.name,
+        keywords: template.id,
+      })),
+    [templates],
   );
 
   const selectedTemplate = useMemo(() => {
@@ -204,22 +217,15 @@ export function TemplatesSettingsSection({
           <div className="flex flex-col gap-2">
             <Label htmlFor="template-select">Message template</Label>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Select
+              <SearchableSelect
+                className="w-full sm:flex-1"
+                options={templateSelectOptions}
                 value={selectedTemplate?.id ?? ""}
-                onValueChange={(value) => onSelectedIdChange(value ?? "")}
-              >
-                <SelectTrigger id="template-select" className="w-full sm:flex-1">
-                  <SelectValue placeholder="Choose a template" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.map((template) => (
-                    <SelectItem key={template.id} value={template.id}>
-                      {template.name}
-                      {isModalTemplate(template) ? " (Modal)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onValueChange={onSelectedIdChange}
+                placeholder="Choose a template"
+                searchPlaceholder="Search templates…"
+                emptyText="No templates found."
+              />
               {selectedTemplate && currentEdit ? (
                 <div className="flex items-center justify-between gap-3 sm:justify-end">
                   <div className="flex items-center gap-2">
