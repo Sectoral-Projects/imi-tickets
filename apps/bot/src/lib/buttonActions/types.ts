@@ -47,6 +47,18 @@ export type ModalConfig = {
 	fields: ModalFieldConfig[];
 };
 
+export const ButtonMessageDelivery = {
+	Presser: 'presser',
+	PresserAndStaff: 'presser_and_staff',
+	PresserAndParticipants: 'presser_and_participants',
+	PresserStaffAndParticipants: 'presser_staff_and_participants'
+} as const;
+
+export type ButtonMessageDelivery =
+	(typeof ButtonMessageDelivery)[keyof typeof ButtonMessageDelivery];
+
+export const DEFAULT_BUTTON_MESSAGE_DELIVERY = ButtonMessageDelivery.PresserAndStaff;
+
 export type ButtonActionConfig = {
 	actionType: ButtonActionType;
 	/** Linked component message template for message actions, or optional submit template after modal. */
@@ -55,6 +67,10 @@ export type ButtonActionConfig = {
 	modalTemplateId?: string;
 	/** Legacy inline modal config; prefer modalTemplateId. */
 	modal?: ModalConfig;
+	/** Where to fan out a linked message beyond the presser's interaction reply. */
+	messageDelivery?: ButtonMessageDelivery;
+	/** After the primary action (if any), close the open ticket like `/close`. */
+	closeTicketOnPress?: boolean;
 };
 
 export type TemplateButtonActions = Record<string, ButtonActionConfig>;

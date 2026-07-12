@@ -43,14 +43,26 @@ export const modalConfigSchema = z.object({
   fields: z.array(modalFieldSchema),
 });
 
+export const buttonMessageDeliverySchema = z.enum([
+  "presser",
+  "presser_and_staff",
+  "presser_and_participants",
+  "presser_staff_and_participants",
+]);
+
+export const DEFAULT_BUTTON_MESSAGE_DELIVERY = "presser_and_staff" as const;
+
 export const buttonActionConfigSchema = z.object({
   actionType: buttonActionTypeSchema,
   templateId: z.string().optional(),
   modalTemplateId: z.string().optional(),
   modal: modalConfigSchema.optional(),
+  messageDelivery: buttonMessageDeliverySchema.optional(),
+  closeTicketOnPress: z.boolean().optional(),
 });
 
 export type ButtonActionType = z.infer<typeof buttonActionTypeSchema>;
+export type ButtonMessageDelivery = z.infer<typeof buttonMessageDeliverySchema>;
 export type ModalFieldType = z.infer<typeof modalFieldTypeSchema>;
 export type ModalFieldOption = z.infer<typeof modalFieldOptionSchema>;
 export type ModalFieldConfig = z.infer<typeof modalFieldSchema>;

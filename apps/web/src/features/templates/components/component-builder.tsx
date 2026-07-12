@@ -28,6 +28,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { SearchableSelect } from "@/components/searchable-select";
 import { cn } from "@/lib/utils";
 import { previewTemplate } from "../api/templates";
 import type { MessageTemplate } from "../schemas/templates";
@@ -48,6 +49,28 @@ import {
 import { AccentColorPicker } from "./accent-color-picker";
 import { TemplatePreviewPanel } from "./template-preview";
 import { VariableHighlightTextarea } from "./variable-highlight-textarea";
+import {
+  DEFAULT_BUTTON_MESSAGE_DELIVERY,
+  type ButtonMessageDelivery,
+} from "../schemas/button-actions";
+
+const MESSAGE_DELIVERY_OPTIONS: {
+  value: ButtonMessageDelivery;
+  label: string;
+}[] = [
+  { value: "presser", label: "Only this user" },
+  { value: "presser_and_staff", label: "This user and staff channel" },
+  {
+    value: "presser_and_participants",
+    label: "This user and other participants",
+  },
+  {
+    value: "presser_staff_and_participants",
+    label: "This user, staff channel, and other participants",
+  },
+];
+
+const NONE_OPTION_VALUE = "__none__";
 
 export function ComponentBuilder({
   templateId,
@@ -70,6 +93,46 @@ export function ComponentBuilder({
   const channelOpenButtons = usesChannelOpenButtons(templateId);
   const externalOpenButtons = usesExternalOpenButtons(templateId);
   const embedButtonsInTemplate = !externalOpenButtons;
+
+  const linkableTemplateOptions = useMemo(
+    () =>
+      linkableTemplates.map((template) => ({
+        value: template.id,
+        label: template.name,
+        keywords: template.id,
+      })),
+    [linkableTemplates],
+  );
+
+  const modalTemplateOptions = useMemo(
+    () =>
+      modalTemplates.map((template) => ({
+        value: template.id,
+        label: template.name,
+        keywords: template.id,
+      })),
+    [modalTemplates],
+  );
+
+  const messageTemplateOptions = useMemo(
+    () =>
+      embedButtonsInTemplate
+        ? [
+            { value: NONE_OPTION_VALUE, label: "No message" },
+            ...linkableTemplateOptions,
+          ]
+        : linkableTemplateOptions,
+    [embedButtonsInTemplate, linkableTemplateOptions],
+  );
+
+  const submitTemplateOptions = useMemo(
+    () => [
+      { value: NONE_OPTION_VALUE, label: "No follow-up message" },
+      ...linkableTemplateOptions,
+    ],
+    [linkableTemplateOptions],
+  );
+
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [previewComponents, setPreviewComponents] = useState<unknown | null>(
@@ -480,73 +543,100 @@ export function ComponentBuilder({
                       <Label>
                         {dmOpenButtons ? "Linked template" : "Component message template"}
                       </Label>
-                      <Select
-                        value={item.templateId}
-                        disabled={disabled}
-                        onValueChange={(nextTemplateId) =>
-                          updateItem(index, { templateId: nextTemplateId ?? "" })
+                      <SearchableSelect
+                        options={messageTemplateOptions}
+                        value={
+                          embedButtonsInTemplate
+                            ? item.templateId || NONE_OPTION_VALUE
+                            : item.templateId
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {linkableTemplates.map((template) => (
-                            <SelectItem key={template.id} value={template.id}>
-                              {template.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        disabled={disabled}
+                        placeholder={
+                          embedButtonsInTemplate
+                            ? "No message (optional)"
+                            : "Choose template"
+                        }
+                        searchPlaceholder="Search templates…"
+                        emptyText="No templates found."
+                        onValueChange={(nextTemplateId) =>
+                          updateItem(index, {
+                            templateId:
+                              nextTemplateId === NONE_OPTION_VALUE
+                                ? ""
+                                : nextTemplateId,
+                          })
+                        }
+                      />
+                      {embedButtonsInTemplate && !item.templateId ? (
+                        <p className="text-sm text-muted-foreground">
+                          With no linked template, enable &quot;Also close ticket&quot; so the
+                          button still does something.
+                        </p>
+                      ) : null}
                     </div>
                   ) : item.actionType === "modal" ? (
                     <>
                       <div className="flex flex-col gap-2">
                         <Label>Modal template</Label>
-                        <Select
+                        <SearchableSelect
+                          options={modalTemplateOptions}
                           value={item.modalTemplateId}
                           disabled={disabled}
+                          placeholder="Choose modal template"
+                          searchPlaceholder="Search modal templates…"
+                          emptyText="No modal templates found."
                           onValueChange={(nextModalTemplateId) =>
-                            updateItem(index, { modalTemplateId: nextModalTemplateId ?? "" })
+                            updateItem(index, {
+                              modalTemplateId: nextModalTemplateId,
+                            })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Choose modal template" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {modalTemplates.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                       <div className="flex flex-col gap-2">
                         <Label>Submit template (optional)</Label>
-                        <Select
-                          value={item.templateId || "__none__"}
+                        <SearchableSelect
+                          options={submitTemplateOptions}
+                          value={item.templateId || NONE_OPTION_VALUE}
                           disabled={disabled}
+                          placeholder="No follow-up message"
+                          searchPlaceholder="Search templates…"
+                          emptyText="No templates found."
                           onValueChange={(nextTemplateId) =>
                             updateItem(index, {
-                              templateId: nextTemplateId === "__none__" ? "" : nextTemplateId ?? "",
+                              templateId:
+                                nextTemplateId === NONE_OPTION_VALUE
+                                  ? ""
+                                  : nextTemplateId,
                             })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="No follow-up message" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">No follow-up message</SelectItem>
-                            {linkableTemplates.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                     </>
+                  ) : null}
+                  {embedButtonsInTemplate && item.templateId.trim() ? (
+                    <div className="flex flex-col gap-2">
+                      <Label>Message delivery</Label>
+                      <Select
+                        value={item.messageDelivery ?? DEFAULT_BUTTON_MESSAGE_DELIVERY}
+                        disabled={disabled}
+                        onValueChange={(messageDelivery) =>
+                          updateItem(index, {
+                            messageDelivery: messageDelivery as ButtonMessageDelivery,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MESSAGE_DELIVERY_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   ) : null}
                   <div className="flex items-center justify-between">
                     <Label className="text-sm">Enabled</Label>
@@ -558,6 +648,23 @@ export function ComponentBuilder({
                       }
                     />
                   </div>
+                  {embedButtonsInTemplate ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-sm">Also close ticket</Label>
+                        <p className="text-sm text-muted-foreground">
+                          After this button finishes, close the open ticket like /close.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={item.closeTicketOnPress}
+                        disabled={disabled}
+                        onCheckedChange={(closeTicketOnPress) =>
+                          updateItem(index, { closeTicketOnPress })
+                        }
+                      />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
