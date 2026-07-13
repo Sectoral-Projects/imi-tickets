@@ -1,6 +1,7 @@
 export const RESERVED_BOT_COMMANDS = new Set([
 	'about',
 	'add',
+	'autoclose',
 	'block',
 	'blocked',
 	'close',
@@ -11,5 +12,6 @@ export const RESERVED_BOT_COMMANDS = new Set([
 	'ping',
 	'remove',
 	'rename',
+	'snippets',
 	'unblock'
 ]);

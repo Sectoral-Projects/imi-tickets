@@ -15,11 +15,25 @@ export type StaffRoleAlias = {
 	alias: string;
 };
 
+/** Discord presence statuses used when pinging staff on new tickets. `all` means every status. */
+export const NotifyOnNewThreadPresence = {
+	Online: 'online',
+	Idle: 'idle',
+	Dnd: 'dnd',
+	All: 'all'
+} as const;
+export type NotifyOnNewThreadPresence =
+	(typeof NotifyOnNewThreadPresence)[keyof typeof NotifyOnNewThreadPresence];
+
 export type AppSettings = {
 	closeAfterMinutes?: number;
 	autoCloseReminderMinutes?: number;
 	autoTagClosedThreads?: boolean;
 	notifyOnNewThread?: boolean;
+	/** Primary-guild role IDs whose members may be pinged when a ticket opens. */
+	notifyOnNewThreadRoleIds?: string[];
+	/** Presence filter for who to ping; `all` includes every status. */
+	notifyOnNewThreadPresence?: NotifyOnNewThreadPresence[];
 	relayStaffTypingToMember?: boolean;
 	anonymousStaff?: boolean;
 	/** Maps primary-guild role IDs to member-facing relay labels. */
@@ -84,6 +98,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	staffRoleAliases: [],
 	autoTagClosedThreads: false,
 	notifyOnNewThread: false,
+	notifyOnNewThreadRoleIds: [],
+	notifyOnNewThreadPresence: [NotifyOnNewThreadPresence.All],
 	ticketOpenButtonMode: TicketOpenButtonMode.Off,
 	staffTicketOpenProfile: true,
 	forwardTemplateButtonsToStaff: true,
@@ -282,6 +298,14 @@ function applySettingsPatch(
 		target.notifyOnNewThread = patch.notifyOnNewThread;
 	}
 
+	if ('notifyOnNewThreadRoleIds' in patch && patch.notifyOnNewThreadRoleIds !== undefined) {
+		target.notifyOnNewThreadRoleIds = normalizeNotifyRoleIds(patch.notifyOnNewThreadRoleIds);
+	}
+
+	if ('notifyOnNewThreadPresence' in patch && patch.notifyOnNewThreadPresence !== undefined) {
+		target.notifyOnNewThreadPresence = normalizeNotifyPresence(patch.notifyOnNewThreadPresence);
+	}
+
 	if ('relayStaffTypingToMember' in patch && patch.relayStaffTypingToMember !== undefined) {
 		target.relayStaffTypingToMember = patch.relayStaffTypingToMember;
 	}
@@ -343,6 +367,10 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
 	}
 
 	normalized.staffRoleAliases = normalizeStaffRoleAliases(normalized.staffRoleAliases ?? []);
+	normalized.notifyOnNewThreadRoleIds = normalizeNotifyRoleIds(normalized.notifyOnNewThreadRoleIds ?? []);
+	normalized.notifyOnNewThreadPresence = normalizeNotifyPresence(
+		normalized.notifyOnNewThreadPresence ?? [NotifyOnNewThreadPresence.All]
+	);
 	normalized.commandPrefix = normalizeBotPrefix(normalized.commandPrefix ?? ';', 'commandPrefix');
 	normalized.privateMessagePrefix = normalizeBotPrefix(
 		normalized.privateMessagePrefix ?? '`',
@@ -391,4 +419,38 @@ function normalizeStaffRoleAliases(value: unknown): StaffRoleAlias[] {
 	}
 
 	return aliases;
+}
+
+function normalizeNotifyRoleIds(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const seen = new Set<string>();
+	const ids: string[] = [];
+	for (const entry of value) {
+		const roleId = String(entry ?? '').trim();
+		if (!roleId || seen.has(roleId)) continue;
+		seen.add(roleId);
+		ids.push(roleId);
+	}
+	return ids;
+}
+
+function normalizeNotifyPresence(value: unknown): NotifyOnNewThreadPresence[] {
+	if (!Array.isArray(value)) return [NotifyOnNewThreadPresence.All];
+
+	const allowed = new Set<string>(Object.values(NotifyOnNewThreadPresence));
+	const seen = new Set<NotifyOnNewThreadPresence>();
+	const statuses: NotifyOnNewThreadPresence[] = [];
+
+	for (const entry of value) {
+		const status = String(entry ?? '').trim() as NotifyOnNewThreadPresence;
+		if (!allowed.has(status) || seen.has(status)) continue;
+		seen.add(status);
+		statuses.push(status);
+	}
+
+	if (statuses.includes(NotifyOnNewThreadPresence.All)) {
+		return [NotifyOnNewThreadPresence.All];
+	}
+
+	return statuses.length > 0 ? statuses : [NotifyOnNewThreadPresence.All];
 }

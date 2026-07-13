@@ -4,12 +4,16 @@ import {
   type TimelineWindowDirection,
 } from "../../api/timeline";
 import type { TimelineItem } from "../../schemas/timeline";
-import { timelineItemKey } from "../../utils/timeline/blocks";
+import {
+  buildTimelineBlocks,
+  type TimelineBlock,
+} from "../../utils/timeline/blocks";
 
 export type TimelineWindowState = {
   anchorMessageId: number;
   items: TimelineItem[];
-  groupBreakBeforeKeys: string[];
+  /** Finalized virtual blocks; grown by page, never rebuilt across pages. */
+  blocks: TimelineBlock[];
   previousCursor: string | null;
   nextCursor: string | null;
 };
@@ -79,7 +83,7 @@ export function useTimelineWindow(options: UseTimelineWindowOptions) {
         setWindowState({
           anchorMessageId: messageId,
           items: result.items,
-          groupBreakBeforeKeys: [],
+          blocks: buildTimelineBlocks(result.items),
           previousCursor: result.previousCursor,
           nextCursor: result.nextCursor,
         });
@@ -117,14 +121,10 @@ export function useTimelineWindow(options: UseTimelineWindowOptions) {
 
         if (!mountedRef.current) return;
 
+        const pageBlocks = buildTimelineBlocks(result.items);
+
         setWindowState((current) => {
           if (!current) return current;
-
-          const boundaryItem =
-            direction === "older" ? current.items[0] : result.items[0];
-          const boundaryKey = boundaryItem
-            ? timelineItemKey(boundaryItem)
-            : null;
 
           return {
             ...current,
@@ -132,11 +132,10 @@ export function useTimelineWindow(options: UseTimelineWindowOptions) {
               direction === "older"
                 ? [...result.items, ...current.items]
                 : [...current.items, ...result.items],
-            groupBreakBeforeKeys:
-              boundaryKey &&
-              !current.groupBreakBeforeKeys.includes(boundaryKey)
-                ? [...current.groupBreakBeforeKeys, boundaryKey]
-                : current.groupBreakBeforeKeys,
+            blocks:
+              direction === "older"
+                ? [...pageBlocks, ...current.blocks]
+                : [...current.blocks, ...pageBlocks],
             previousCursor:
               direction === "older"
                 ? result.previousCursor

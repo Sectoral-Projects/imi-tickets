@@ -184,7 +184,9 @@ function persistRelayAttachments(messageId: number, relayContent: ReturnType<typ
 			messageId,
 			url: attachment.url,
 			name: attachment.name ?? undefined,
-			isSpoiler: attachment.isSpoiler
+			isSpoiler: attachment.isSpoiler,
+			width: attachment.width,
+			height: attachment.height
 		});
 	}
 
@@ -196,7 +198,9 @@ function persistRelayAttachments(messageId: number, relayContent: ReturnType<typ
 			messageId,
 			url: media.url,
 			name: media.description,
-			isSpoiler: media.spoiler
+			isSpoiler: media.spoiler,
+			width: media.width,
+			height: media.height
 		});
 	}
 

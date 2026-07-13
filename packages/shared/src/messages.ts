@@ -5,6 +5,10 @@ export type Attachment = {
   url: string;
   name: string | null;
   isSpoiler: boolean;
+  /** Intrinsic pixel width from Discord when known. */
+  width: number | null;
+  /** Intrinsic pixel height from Discord when known. */
+  height: number | null;
   createdAt: string;
   deletedAt: string | null;
 };

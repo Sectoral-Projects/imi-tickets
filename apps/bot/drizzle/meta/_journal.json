@@ -148,6 +148,20 @@
       "when": 1784300000000,
       "tag": "0020_staff_member_dual_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1784400000000,
+      "tag": "0021_scheduled_close_autoclose",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1784500000000,
+      "tag": "0022_attachment_dimensions",
+      "breakpoints": true
     }
   ]
 }

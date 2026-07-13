@@ -12,5 +12,6 @@ export default defineConfig({
 	strict: false,
 	dbCredentials: {
 		url: resolveDatabasePath()
-	}
+	},
+	breakpoints: true
 });

@@ -35,4 +35,8 @@ export abstract class MemberSnapshotService {
 	static findLatestForUser(userId: string, db: DbClient = container.sqlite) {
 		return db.select().from(memberSnapshots).where(eq(memberSnapshots.userId, userId)).orderBy(desc(memberSnapshots.capturedAt)).limit(1).get();
 	}
+
+	static findById(id: number, db: DbClient = container.sqlite) {
+		return db.select().from(memberSnapshots).where(eq(memberSnapshots.id, id)).get();
+	}
 }

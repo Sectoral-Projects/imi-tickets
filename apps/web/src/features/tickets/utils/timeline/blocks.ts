@@ -20,23 +20,64 @@ export type TimelineBlock = TimelineMessageBlock | TimelineAuditBlock;
 /** Position of a message inside a visual chain group (for card chrome). */
 export type MessageGroupPos = "solo" | "start" | "middle" | "end";
 
-export type FlattenedTimelineRow =
-  | {
-      kind: "message";
-      message: EnrichedMessage;
-      groupPos: MessageGroupPos;
-    }
-  | {
-      kind: "audit";
-      auditId: number;
-      label: string;
-      createdAt: string;
-    };
-
 export function timelineItemKey(item: TimelineItem) {
   return item.kind === "message"
     ? `message-${item.message.id}`
     : `audit-${item.audit.id}`;
+}
+
+/** Stable virtualizer key for a built timeline block. */
+export function timelineBlockKey(block: TimelineBlock) {
+  if (block.kind === "audit") return `audit-${block.auditId}`;
+  return `group-${block.messages[0]!.id}`;
+}
+
+/**
+ * Dev-only: after a history prepend, previously loaded blocks must remain an
+ * unchanged suffix with unique keys (TanStack `anchorTo: "end"` contract).
+ * Full replacements (seek / window seed) skip this check.
+ */
+export function assertStableBlockPrepend(
+  previous: readonly TimelineBlock[],
+  next: readonly TimelineBlock[],
+) {
+  if (!import.meta.env.DEV) return;
+  if (previous.length === 0 || next.length <= previous.length) return;
+
+  const prevKeys = previous.map(timelineBlockKey);
+  const nextKeys = next.map(timelineBlockKey);
+
+  const seen = new Set<string>();
+  for (const key of nextKeys) {
+    if (seen.has(key)) {
+      throw new Error(
+        `Timeline block key "${key}" duplicated after prepend — keys must be unique for anchorTo:"end".`,
+      );
+    }
+    seen.add(key);
+  }
+
+  // Prepend: first key changed and previous keys are the new suffix.
+  if (nextKeys[0] === prevKeys[0]) return;
+
+  const suffix = nextKeys.slice(nextKeys.length - prevKeys.length);
+  for (let index = 0; index < prevKeys.length; index += 1) {
+    if (suffix[index] !== prevKeys[index]) {
+      throw new Error(
+        `Timeline prepend broke immutable block suffix at index ${index}: expected "${prevKeys[index]}", got "${suffix[index]}".`,
+      );
+    }
+  }
+}
+
+export function messageGroupPosForIndex(
+  index: number,
+  count: number,
+): MessageGroupPos {
+  if (count === 1) return "solo";
+  if (index === 0) return "start";
+  if (index === count - 1) return "end";
+  return "middle";
 }
 
 function messageHasReply(message: EnrichedMessage) {
@@ -146,40 +187,4 @@ export function buildTimelineBlocks(
 
   flushGroup();
   return blocks;
-}
-
-/**
- * Flatten grouped blocks into one virtualizer row per message/audit.
- * Stable per-message keys are required for TanStack Virtual's end-anchored
- * prepend stability — grouping multiple messages under one key causes a
- * visible jump when older history merges into an existing group.
- */
-export function flattenTimelineBlocks(blocks: readonly TimelineBlock[]): FlattenedTimelineRow[] {
-  const rows: FlattenedTimelineRow[] = [];
-
-  for (const block of blocks) {
-    if (block.kind === "audit") {
-      rows.push({
-        kind: "audit",
-        auditId: block.auditId,
-        label: block.label,
-        createdAt: block.createdAt,
-      });
-      continue;
-    }
-
-    const { messages } = block;
-    if (messages.length === 1) {
-      rows.push({ kind: "message", message: messages[0], groupPos: "solo" });
-      continue;
-    }
-
-    messages.forEach((message, index) => {
-      const groupPos: MessageGroupPos =
-        index === 0 ? "start" : index === messages.length - 1 ? "end" : "middle";
-      rows.push({ kind: "message", message, groupPos });
-    });
-  }
-
-  return rows;
 }

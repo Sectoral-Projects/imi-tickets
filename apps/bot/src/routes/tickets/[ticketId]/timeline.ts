@@ -47,7 +47,8 @@ export default class TicketTimeline extends Route {
 
 		const result = TimelineService.listTimeline({
 			threadId: ticketId,
-			cursor
+			cursor,
+			limit
 		});
 
 		return c.json(result);

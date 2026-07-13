@@ -10,10 +10,16 @@ export interface CreateAttachmentInput {
 	url: string;
 	name?: string;
 	isSpoiler?: boolean;
+	width?: number | null;
+	height?: number | null;
 }
 
 export abstract class AttachmentService {
 	static create(data: AttachmentParent & CreateAttachmentInput, db: DbClient = container.sqlite) {
+		const width = normalizeDimension(data.width);
+		const height = normalizeDimension(data.height);
+		const hasDims = width != null && height != null;
+
 		return db
 			.insert(attachments)
 			.values({
@@ -22,6 +28,8 @@ export abstract class AttachmentService {
 				url: data.url,
 				name: data.name,
 				isSpoiler: data.isSpoiler ?? false,
+				width: hasDims ? width : null,
+				height: hasDims ? height : null,
 				createdAt: new Date()
 			})
 			.returning()
@@ -35,4 +43,9 @@ export abstract class AttachmentService {
 	static listForNote(noteId: number, db: DbClient = container.sqlite) {
 		return db.select().from(attachments).where(eq(attachments.noteId, noteId)).all();
 	}
+}
+
+function normalizeDimension(value: number | null | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+	return Math.round(value);
 }

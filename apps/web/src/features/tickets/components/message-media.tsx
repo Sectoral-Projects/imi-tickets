@@ -1,16 +1,34 @@
 import type { Attachment } from "../schemas/messages";
 import { cn } from "@/lib/utils";
-import { isHostedVideoUrl, isImageMediaUrl, isVeedUrl, isYoutubeUrl } from "../utils/message-media";
+import {
+  getInlineMediaDisplaySize,
+  hasInlineMediaDimensions,
+  isHostedVideoUrl,
+  isImageMediaUrl,
+  isVeedUrl,
+  isYoutubeUrl,
+} from "../utils/message-media";
 import { EmbedVideoPlayer } from "./embed-video-player";
 
 type MessageMediaProps = {
   attachment: Attachment;
   className?: string;
+  /** Content-column max width — must match virtualizer estimate input. */
+  maxWidthPx?: number;
 };
 
-export function MessageMedia({ attachment, className }: MessageMediaProps) {
+export function MessageMedia({
+  attachment,
+  className,
+  maxWidthPx,
+}: MessageMediaProps) {
   const url = attachment.url;
   const label = attachment.name ?? url;
+  const hasDims = hasInlineMediaDimensions(attachment);
+  const display =
+    hasDims && maxWidthPx != null
+      ? getInlineMediaDisplaySize(attachment, maxWidthPx)
+      : null;
 
   if (isImageMediaUrl(url)) {
     return (
@@ -24,8 +42,18 @@ export function MessageMedia({ attachment, className }: MessageMediaProps) {
         <img
           src={url}
           alt={label}
+          width={display?.width ?? (hasDims ? attachment.width! : undefined)}
+          height={display?.height ?? (hasDims ? attachment.height! : undefined)}
+          style={
+            display
+              ? { width: display.width, height: display.height }
+              : undefined
+          }
           className={cn(
-            "max-h-80 max-w-full rounded-md border border-border object-contain",
+            "rounded-md border border-border object-contain",
+            display
+              ? "max-w-full"
+              : "h-auto max-h-80 max-w-full",
             attachment.isSpoiler && "blur-sm hover:blur-none",
           )}
         />
@@ -42,7 +70,18 @@ export function MessageMedia({ attachment, className }: MessageMediaProps) {
       <video
         src={url}
         controls
-        className={cn("max-h-80 max-w-full rounded-md border border-border", className)}
+        width={display?.width ?? (hasDims ? attachment.width! : undefined)}
+        height={display?.height ?? (hasDims ? attachment.height! : undefined)}
+        style={
+          display
+            ? { width: display.width, height: display.height }
+            : undefined
+        }
+        className={cn(
+          "rounded-md border border-border",
+          display ? "max-w-full object-contain" : "h-auto max-h-80 max-w-full",
+          className,
+        )}
       />
     );
   }

@@ -42,7 +42,11 @@ export class RemoveCommand extends Command {
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
 		try {
 			if (!(await requireGuildPermission(interaction))) {
-				await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+				await respondComponents(
+					interaction,
+					textComponent('Remove', ['You do not have permission to use this command.']),
+					{ fallback: 'You do not have permission to use this command.' }
+				);
 				return;
 			}
 
@@ -65,7 +69,11 @@ export class RemoveCommand extends Command {
 		try {
 			if (!message.inGuild()) return;
 			if (!(await requireGuildPermission(message))) {
-				await message.reply('You do not have permission to use this command.');
+				await respondComponents(
+					message,
+					textComponent('Remove', ['You do not have permission to use this command.']),
+					{ fallback: 'You do not have permission to use this command.' }
+				);
 				return;
 			}
 

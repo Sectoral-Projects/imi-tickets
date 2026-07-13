@@ -2,7 +2,7 @@ import { Message as RelayMessage } from '@/lib/components/message';
 import { extractRelayContent, type RelayContent } from '@/lib/discord/relayContent';
 import { reactionEmojiMatches, type StoredReactionEmoji } from '@/lib/discord/reactionEmoji';
 import { StaffTicketOpenProfile } from '@/lib/components/staffTicketOpenProfile';
-import { guildStaffRolePermissions, linkedGuilds } from '@/database/sqlite/schema';
+import { guildStaffRolePermissions, linkedGuilds, messages } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
 import {
 	ChannelType,
@@ -21,7 +21,7 @@ import {
 	type User
 } from 'discord.js';
 import { eq } from 'drizzle-orm';
-import { SettingsService } from './settings';
+import { SettingsService, NotifyOnNewThreadPresence } from './settings';
 import { ChannelStrategy, SetupService } from './setup';
 import { MessageRelayService } from './messageRelay';
 import { MessageService } from './message';
@@ -32,6 +32,7 @@ import { formatChannelRenameError } from '@/lib/discord/channelRename';
 import { TRANSCRIPT_SYSTEM_AUTHOR_ID } from '@/lib/transcript/systemMessage';
 import { AuditAction, AuditService } from './audit';
 import { RealtimeService } from './realtime';
+import { MemberSnapshotService } from './snapshot';
 import type { DbClient } from './types';
 import type { APIMessageTopLevelComponent } from 'discord.js';
 
@@ -138,7 +139,12 @@ export abstract class TicketChannelService {
 				threadId,
 				db
 			);
-			return channelId ? { channelId, name: channelName } : null;
+			if (channelId) {
+				// Do not await — member fetch / notify must not block modal ack or report forward.
+				void this.notifyStaffOnNewTicket(guild, channelId, settings, db);
+				return { channelId, name: channelName };
+			}
+			return null;
 		}
 
 		const channelId = await this.createCategoryChannel(
@@ -151,7 +157,11 @@ export abstract class TicketChannelService {
 			threadId,
 			db
 		);
-		return channelId ? { channelId, name: channelName } : null;
+		if (channelId) {
+			void this.notifyStaffOnNewTicket(guild, channelId, settings, db);
+			return { channelId, name: channelName };
+		}
+		return null;
 	}
 
 	/**
@@ -352,6 +362,166 @@ export abstract class TicketChannelService {
 			const authorLabel = this.resolveRelayAuthorLabel(thread, stored.authorId, relay.targetChannelId, options);
 			await this.updateSingleRelayMessage(stored, thread, authorLabel, relay);
 		}
+	}
+
+	/**
+	 * After a logical message is soft-deleted: edit the staff-channel copy to keep
+	 * the original body and append `(deleted)`, and delete participant DM copies.
+	 */
+	static async syncMessageDeleted(
+		stored: typeof messages.$inferSelect,
+		thread: {
+			id: number;
+			channelId?: string | null;
+			dmChannelId?: string | null;
+			userId: string;
+			hideMemberIdentities?: boolean;
+		},
+		deletedDiscordMessageId: string
+	) {
+		const staffChannelId = thread.channelId ?? null;
+		const copies = MessageService.listPhysicalDiscordMessages(stored);
+		let deletedStaffCopy = false;
+
+		for (const copy of copies) {
+			if (copy.messageId === deletedDiscordMessageId) {
+				if (staffChannelId && copy.channelId === staffChannelId) {
+					deletedStaffCopy = true;
+				}
+				continue;
+			}
+
+			const isStaffCopy = Boolean(staffChannelId && copy.channelId === staffChannelId);
+			if (isStaffCopy) {
+				await this.markDiscordMessageDeleted(copy.channelId, copy.messageId, stored, thread);
+				continue;
+			}
+
+			await this.deleteDiscordMessage(copy.channelId, copy.messageId);
+		}
+
+		// Staff-side Discord message is already gone — re-post original content with (deleted).
+		if (deletedStaffCopy && staffChannelId) {
+			await this.sendDeletedStaffCopy(staffChannelId, stored, thread);
+		}
+	}
+
+	private static async markDiscordMessageDeleted(
+		channelId: string,
+		messageId: string,
+		stored: typeof messages.$inferSelect,
+		thread: {
+			id: number;
+			channelId?: string | null;
+			dmChannelId?: string | null;
+			userId: string;
+			hideMemberIdentities?: boolean;
+		}
+	) {
+		const channel = await container.client.channels.fetch(channelId).catch(() => null);
+		if (!channel?.isTextBased()) return;
+
+		const message = await channel.messages.fetch(messageId).catch(() => null);
+		if (!message?.editable) return;
+
+		const authorLabel = this.resolveDeletedRelayAuthorLabel(
+			thread,
+			stored.authorId,
+			channelId,
+			stored.memberSnapshotId
+		);
+		const payload = await this.buildRelayPayload(
+			stored.content,
+			authorLabel,
+			{ disableMentions: true },
+			stored.createdAt ?? new Date(),
+			undefined,
+			stored.isForwarded ?? false,
+			undefined,
+			true
+		);
+		await message.edit({
+			components: payload.components,
+			flags: MessageFlags.IsComponentsV2,
+			allowedMentions: payload.allowedMentions
+		}).catch((error) => {
+			container.logger.warn(`Could not mark message ${messageId} as deleted`, error);
+		});
+	}
+
+	private static async deleteDiscordMessage(channelId: string, messageId: string) {
+		const channel = await container.client.channels.fetch(channelId).catch(() => null);
+		if (!channel?.isTextBased()) return;
+
+		const message = await channel.messages.fetch(messageId).catch(() => null);
+		if (!message?.deletable) return;
+
+		await message.delete().catch((error) => {
+			container.logger.warn(`Could not delete mirrored message ${messageId}`, error);
+		});
+	}
+
+	private static async sendDeletedStaffCopy(
+		staffChannelId: string,
+		stored: typeof messages.$inferSelect,
+		thread: {
+			id: number;
+			channelId?: string | null;
+			dmChannelId?: string | null;
+			userId: string;
+			hideMemberIdentities?: boolean;
+		}
+	) {
+		const channel = await container.client.channels.fetch(staffChannelId).catch(() => null);
+		if (!channel?.isTextBased() || !channel.isSendable()) return;
+
+		const authorLabel = this.resolveDeletedRelayAuthorLabel(
+			thread,
+			stored.authorId,
+			staffChannelId,
+			stored.memberSnapshotId
+		);
+		const payload = await this.buildRelayPayload(
+			stored.content,
+			authorLabel,
+			{ disableMentions: true },
+			stored.createdAt ?? new Date(),
+			undefined,
+			stored.isForwarded ?? false,
+			undefined,
+			true
+		);
+		await channel.send({
+			components: payload.components,
+			flags: MessageFlags.IsComponentsV2,
+			allowedMentions: payload.allowedMentions
+		}).catch((error) => {
+			container.logger.warn(`Could not post deleted staff copy for message by ${stored.authorId}`, error);
+		});
+	}
+
+	/**
+	 * Staff-channel relays originally use the Discord username tag. Prefer the
+	 * message's member snapshot (then latest) — never the generic "Member"
+	 * placeholder from resolveRelayAuthorLabel when memberTag is omitted.
+	 */
+	private static resolveDeletedRelayAuthorLabel(
+		thread: { id: number; channelId?: string | null; hideMemberIdentities?: boolean },
+		authorId: string,
+		targetChannelId: string,
+		memberSnapshotId?: number | null
+	) {
+		const snapshot =
+			(memberSnapshotId != null
+				? MemberSnapshotService.findById(memberSnapshotId)
+				: null) ?? MemberSnapshotService.findLatestForUser(authorId);
+		const usernameTag = snapshot?.username?.trim() || 'Unknown user';
+
+		if (targetChannelId === thread.channelId) {
+			return usernameTag;
+		}
+
+		return TicketService.memberAuthorLabel(thread, authorId, usernameTag);
 	}
 
 	private static resolveRelayAuthorLabel(
@@ -614,7 +784,8 @@ export abstract class TicketChannelService {
 		timestamp = new Date(),
 		media?: RelayContent['media'],
 		forwarded = false,
-		linkPreviews?: RelayContent['linkPreviews']
+		linkPreviews?: RelayContent['linkPreviews'],
+		deleted = false
 	): Promise<MessageCreateOptions> {
 		const hasRenderableContent = Boolean(
 			content.trim() || media?.length || linkPreviews?.length
@@ -625,7 +796,8 @@ export abstract class TicketChannelService {
 			timestamp: time(timestamp, 'f'),
 			media,
 			linkPreviews,
-			forwarded
+			forwarded,
+			deleted
 		});
 
 		return {
@@ -829,6 +1001,109 @@ export abstract class TicketChannelService {
 
 		return channel.id;
 	}
+
+	/**
+	 * Pings staff in the newly created ticket channel/post.
+	 * "All" presence → role mentions (no member fetch).
+	 * Specific statuses → individual mentions for matching online members.
+	 */
+	private static async notifyStaffOnNewTicket(
+		guild: Guild,
+		channelId: string,
+		settings: ReturnType<typeof SettingsService.getAppSettings>,
+		_db: DbClient
+	) {
+		try {
+			if (!settings.notifyOnNewThread) return;
+
+			const roleIds = (settings.notifyOnNewThreadRoleIds ?? []).filter(Boolean);
+			if (roleIds.length === 0) return;
+
+			const presenceFilter = settings.notifyOnNewThreadPresence ?? [NotifyOnNewThreadPresence.All];
+			const allowAll = presenceFilter.includes(NotifyOnNewThreadPresence.All);
+			const allowedStatuses = new Set<string>(
+				allowAll
+					? []
+					: presenceFilter.filter((status) => status !== NotifyOnNewThreadPresence.All)
+			);
+
+			const channel = await guild.channels.fetch(channelId).catch(() => null);
+			if (!channel?.isTextBased() || !channel.isSendable()) return;
+
+			// All statuses: ping the roles themselves — faster and avoids mentioning everyone by user.
+			if (allowAll) {
+				const chunks = chunkRoleMentions(roleIds, 40, 1800);
+				for (const chunk of chunks) {
+					await channel
+						.send({
+							content: chunk.map((id) => `<@&${id}>`).join(' '),
+							allowedMentions: { roles: chunk, parse: [] }
+						})
+						.catch((error) => {
+							container.logger.warn(`Failed to send new-ticket role notify in ${channelId}`, error);
+						});
+				}
+				return;
+			}
+
+			await guild.members.fetch().catch((error) => {
+				container.logger.warn('Failed to fetch guild members for new-ticket notify', error);
+			});
+
+			const userIds = new Set<string>();
+			for (const member of guild.members.cache.values()) {
+				if (member.user.bot) continue;
+				if (!roleIds.some((roleId) => member.roles.cache.has(roleId))) continue;
+
+				const status = member.presence?.status;
+				if (!status || status === 'offline' || status === 'invisible') continue;
+				if (!allowedStatuses.has(status)) continue;
+
+				userIds.add(member.id);
+			}
+
+			if (userIds.size === 0) return;
+
+			const chunks = chunkIds([...userIds], 40, 1800);
+			for (const chunk of chunks) {
+				await channel
+					.send({
+						content: chunk.map((id) => `<@${id}>`).join(' '),
+						allowedMentions: { users: chunk, parse: [] }
+					})
+					.catch((error) => {
+						container.logger.warn(`Failed to send new-ticket notify in ${channelId}`, error);
+					});
+			}
+		} catch (error) {
+			container.logger.warn(`Unexpected error during new-ticket notify in ${channelId}`, error);
+		}
+	}
+}
+
+function chunkIds(ids: string[], maxItems: number, maxChars: number, mentionOverhead = 3) {
+	const chunks: string[][] = [];
+	let current: string[] = [];
+	let currentLength = 0;
+
+	for (const id of ids) {
+		const mentionLength = id.length + mentionOverhead; // <@id> or <@&id>
+		const nextLength = currentLength + mentionLength + (current.length > 0 ? 1 : 0);
+		if (current.length >= maxItems || (current.length > 0 && nextLength > maxChars)) {
+			chunks.push(current);
+			current = [];
+			currentLength = 0;
+		}
+		current.push(id);
+		currentLength += mentionLength + (current.length > 1 ? 1 : 0);
+	}
+
+	if (current.length > 0) chunks.push(current);
+	return chunks;
+}
+
+function chunkRoleMentions(ids: string[], maxItems: number, maxChars: number) {
+	return chunkIds(ids, maxItems, maxChars, 4); // <@&id>
 }
 
 function formatRoleMentions(member: GuildMember) {

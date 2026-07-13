@@ -157,6 +157,31 @@ export abstract class TicketService {
 			.run();
 	}
 
+	static setScheduledClose(threadId: number, at: Date, db: DbClient = container.sqlite) {
+		return db
+			.update(threads)
+			.set({ scheduledCloseAt: at })
+			.where(and(eq(threads.id, threadId), eq(threads.status, ThreadStatus.Open), isNull(threads.deletedAt)))
+			.run();
+	}
+
+	/** Clears a pending scheduled close. Returns true when a schedule was present. */
+	static clearScheduledClose(threadId: number, db: DbClient = container.sqlite): boolean {
+		const existing = db
+			.select({ scheduledCloseAt: threads.scheduledCloseAt })
+			.from(threads)
+			.where(eq(threads.id, threadId))
+			.get();
+		if (!existing?.scheduledCloseAt) return false;
+
+		db.update(threads).set({ scheduledCloseAt: null }).where(eq(threads.id, threadId)).run();
+		return true;
+	}
+
+	static setAutoCloseDisabled(threadId: number, disabled: boolean, db: DbClient = container.sqlite) {
+		return db.update(threads).set({ autoCloseDisabled: disabled }).where(eq(threads.id, threadId)).run();
+	}
+
 	/**
 	 * Paginated, filterable ticket listing, enriched with each thread's
 	 * latest message and the opening user's latest identity snapshot.
@@ -300,7 +325,7 @@ export abstract class TicketService {
 
 			const thread = tx
 				.update(threads)
-				.set({ status: ThreadStatus.Closed, closedAt: now })
+				.set({ status: ThreadStatus.Closed, closedAt: now, scheduledCloseAt: null })
 				.where(eq(threads.id, data.threadId))
 				.returning()
 				.get();

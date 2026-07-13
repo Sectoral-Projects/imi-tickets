@@ -7,7 +7,7 @@ import {
 
 export const StaffPageButtonPrefix = 'staff_page:';
 
-export type StaffPageKind = 'logs' | 'blocked' | 'help';
+export type StaffPageKind = 'logs' | 'blocked' | 'help' | 'snippets';
 
 export type StaffPageState = {
 	kind: StaffPageKind;
@@ -25,7 +25,7 @@ export function parseStaffPageCustomId(customId: string): StaffPageState | null 
 
 	const payload = customId.slice(StaffPageButtonPrefix.length);
 	const [kind, encodedContext = '', pageRaw] = payload.split(':');
-	if (kind !== 'logs' && kind !== 'blocked' && kind !== 'help') return null;
+	if (kind !== 'logs' && kind !== 'blocked' && kind !== 'help' && kind !== 'snippets') return null;
 
 	const page = Number(pageRaw);
 	if (!Number.isInteger(page) || page < 0) return null;

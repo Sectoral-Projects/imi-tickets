@@ -10,6 +10,8 @@ export type MessageComponentVars = {
 	media?: RelayMediaItem[];
 	linkPreviews?: RelayLinkPreview[];
 	forwarded?: boolean;
+	/** Soft-deleted: show *(deleted)* beside the timestamp (transcript-style). */
+	deleted?: boolean;
 };
 
 const FORWARDED_LABEL = '-# ↪ *Forwarded*';
@@ -36,10 +38,13 @@ export class MessageComponent extends Component<MessageComponentVars> {
 
 	public override async render(vars: MessageComponentVars) {
 		const displayMessage = vars.forwarded ? formatForwardedDiscordText(vars.message) : vars.message;
+		const timestamp = vars.deleted
+			? `${vars.timestamp} *(deleted)*`
+			: vars.timestamp;
 		const components = await super.render({
 			author: vars.author ?? '',
 			message: displayMessage.trim() || ' ',
-			timestamp: vars.timestamp
+			timestamp
 		});
 
 		const mainComponents = components.map((component) => {

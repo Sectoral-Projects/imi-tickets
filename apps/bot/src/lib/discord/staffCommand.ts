@@ -12,7 +12,10 @@ import {
 import type { Command } from '@sapphire/framework';
 import { paginatedTextComponent, type StaffPageKind } from '@/lib/discord/staffPagination';
 
-export type CommandTarget = Message | Command.ChatInputCommandInteraction;
+export type CommandTarget =
+	| Message
+	| Command.ChatInputCommandInteraction
+	| Command.ContextMenuCommandInteraction;
 
 const componentReplyFlags = [MessageFlags.IsComponentsV2] as const;
 const ephemeralComponentReplyFlags = [MessageFlags.IsComponentsV2, MessageFlags.Ephemeral] as const;

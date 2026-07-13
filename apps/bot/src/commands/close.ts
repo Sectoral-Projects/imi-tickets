@@ -1,8 +1,9 @@
 import { Closed } from '@/lib/components/closed';
 import { NotFound } from '@/lib/components/notFound';
-import { RbacPermission, RbacService } from '@/services/rbac';
+import { parseDurationOrDate, splitLeadingTimeAndReason } from '@/lib/discord/parseDurationOrDate';
+import { requireGuildPermission, respondComponents, textComponent } from '@/lib/discord/staffCommand';
+import { AutoCloseService } from '@/services/autoClose';
 import { TicketCloseService } from '@/services/ticketClose';
-import { TicketParticipantService } from '@/services/ticketParticipant';
 import { TicketService } from '@/services/ticket';
 import { ApplyOptions } from '@sapphire/decorators';
 import { Args, Command } from '@sapphire/framework';
@@ -25,6 +26,12 @@ export class UserCloseCommand extends Command {
 			description: this.description,
 			options: [
 				{
+					name: 'time',
+					description: 'Schedule close after a duration or on a date (e.g. 24h, 08/12). Staff only.',
+					type: ApplicationCommandOptionType.String,
+					required: false
+				},
+				{
 					name: 'reason',
 					description: 'Why the ticket is being closed.',
 					type: ApplicationCommandOptionType.String,
@@ -43,15 +50,33 @@ export class UserCloseCommand extends Command {
 
 		if (!message.inGuild()) return;
 
-		const reason = await this.parseReason(args);
-		return this.handleStaffMessage(message, reason);
+		const rest = await args.rest('string').catch(() => null);
+		const { time, reason, error } = splitLeadingTimeAndReason(rest?.trim() ?? '');
+		if (error) {
+			await respondComponents(message, textComponent('Close', [error]), { fallback: error });
+			return;
+		}
+
+		return this.handleStaffMessage(message, reason, time?.at);
 	}
 
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
 		const reason = interaction.options.getString('reason') ?? undefined;
+		const timeRaw = interaction.options.getString('time');
 
 		if (interaction.inGuild()) {
-			return this.handleStaffInteraction(interaction, reason);
+			let scheduledAt: Date | undefined;
+			if (timeRaw?.trim()) {
+				const parsed = parseDurationOrDate(timeRaw);
+				if (!parsed.ok) {
+					await respondComponents(interaction, textComponent('Close', [parsed.error]), {
+						fallback: parsed.error
+					});
+					return;
+				}
+				scheduledAt = parsed.at;
+			}
+			return this.handleStaffInteraction(interaction, reason, scheduledAt);
 		}
 
 		return this.handleUserInteraction(interaction);
@@ -68,7 +93,9 @@ export class UserCloseCommand extends Command {
 	private async handleUserMessage(message: Message) {
 		const thread = TicketService.findOpenThreadForUser(message.author.id);
 		if (!thread) {
-			await message.reply({ components: await NotFound.render(), flags: [MessageFlags.IsComponentsV2] });
+			await respondComponents(message, await NotFound.render(), {
+				fallback: 'No open ticket found.'
+			});
 			return;
 		}
 
@@ -78,10 +105,7 @@ export class UserCloseCommand extends Command {
 			skipMemberDm: true
 		});
 
-		await message.reply({
-			components: await Closed.render(),
-			flags: [MessageFlags.IsComponentsV2]
-		});
+		await respondComponents(message, await Closed.render(), { fallback: 'Ticket closed.' });
 	}
 
 	private async handleUserInteraction(
@@ -91,7 +115,9 @@ export class UserCloseCommand extends Command {
 
 		const thread = TicketService.findOpenThreadForUser(interaction.user.id);
 		if (!thread) {
-			await interaction.editReply({ components: await NotFound.render(), flags: [MessageFlags.IsComponentsV2] });
+			await respondComponents(interaction, await NotFound.render(), {
+				fallback: 'No open ticket found.'
+			});
 			return;
 		}
 
@@ -101,26 +127,39 @@ export class UserCloseCommand extends Command {
 			skipMemberDm: true
 		});
 
-		await interaction.editReply({ components: await Closed.render(), flags: [MessageFlags.IsComponentsV2] });
+		await respondComponents(interaction, await Closed.render(), { fallback: 'Ticket closed.' });
 	}
 
-	private async handleStaffMessage(message: Message, reason?: string) {
+	private async handleStaffMessage(message: Message, reason?: string, scheduledAt?: Date) {
 		const thread = TicketService.findOpenByStaffChannelId(message.channel.id);
 		if (!thread) {
-			await message.reply({ components: await NotFound.render(), flags: [MessageFlags.IsComponentsV2] });
+			await respondComponents(message, await NotFound.render(), {
+				fallback: 'No open ticket found for this channel.'
+			});
 			return;
 		}
 
-		if (!(await this.canCloseAsStaff(message.author.id, message.guildId))) {
-			await message.reply({ content: 'You do not have permission to close tickets.' });
+		if (!(await requireGuildPermission(message))) {
+			await respondComponents(
+				message,
+				textComponent('Close', ['You do not have permission to close tickets.']),
+				{ fallback: 'You do not have permission to close tickets.' }
+			);
 			return;
 		}
 
-		TicketParticipantService.noteStaffActivityInChannel(message.channel.id, message.author.id);
+		if (scheduledAt) {
+			TicketService.setScheduledClose(thread.id, scheduledAt);
+			AutoCloseService.wake();
+			const unix = Math.floor(scheduledAt.getTime() / 1000);
+			const reasonPart = reason ? ` Reason: ${reason}` : '';
+			const line = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${reasonPart}`;
+			await respondComponents(message, textComponent('Close', [line]), { fallback: line });
+			return;
+		}
 
-		await message.reply({
-			content: reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.'
-		});
+		const line = reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.';
+		await respondComponents(message, textComponent('Close', [line]), { fallback: line });
 
 		await TicketCloseService.close({
 			threadId: thread.id,
@@ -131,47 +170,54 @@ export class UserCloseCommand extends Command {
 
 	private async handleStaffInteraction(
 		interaction: Command.ChatInputCommandInteraction | Command.ContextMenuCommandInteraction,
-		reason?: string
+		reason?: string,
+		scheduledAt?: Date
 	) {
 		await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
 		if (!interaction.channel) {
-			await interaction.editReply({ content: 'This command can only be used in a ticket channel.' });
+			await respondComponents(
+				interaction,
+				textComponent('Close', ['This command can only be used in a ticket channel.']),
+				{ fallback: 'This command can only be used in a ticket channel.' }
+			);
 			return;
 		}
 
 		const thread = TicketService.findOpenByStaffChannelId(interaction.channel.id);
 		if (!thread) {
-			await interaction.editReply({ components: await NotFound.render(), flags: [MessageFlags.IsComponentsV2] });
+			await respondComponents(interaction, await NotFound.render(), {
+				fallback: 'No open ticket found for this channel.'
+			});
 			return;
 		}
 
-		if (!(await this.canCloseAsStaff(interaction.user.id, interaction.guildId))) {
-			await interaction.editReply({ content: 'You do not have permission to close tickets.' });
+		if (!(await requireGuildPermission(interaction))) {
+			await respondComponents(
+				interaction,
+				textComponent('Close', ['You do not have permission to close tickets.']),
+				{ fallback: 'You do not have permission to close tickets.' }
+			);
 			return;
 		}
 
-		TicketParticipantService.noteStaffActivityInChannel(interaction.channel.id, interaction.user.id);
+		if (scheduledAt) {
+			TicketService.setScheduledClose(thread.id, scheduledAt);
+			AutoCloseService.wake();
+			const unix = Math.floor(scheduledAt.getTime() / 1000);
+			const reasonPart = reason ? ` Reason: ${reason}` : '';
+			const line = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${reasonPart}`;
+			await respondComponents(interaction, textComponent('Close', [line]), { fallback: line });
+			return;
+		}
 
-		await interaction.editReply({
-			content: reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.'
-		});
+		const line = reason ? `Ticket closed. Reason: ${reason}` : 'Ticket closed.';
+		await respondComponents(interaction, textComponent('Close', [line]), { fallback: line });
 
 		await TicketCloseService.close({
 			threadId: thread.id,
 			executedBy: interaction.user.id,
 			reason
 		});
-	}
-
-	private canCloseAsStaff(userId: string, guildId: string | null) {
-		if (!guildId) return false;
-		return RbacService.hasGuildPermission(userId, guildId, RbacPermission.Manage);
-	}
-
-	private async parseReason(args: Args) {
-		const reason = await args.rest('string').catch(() => null);
-		const trimmed = reason?.trim();
-		return trimmed || undefined;
 	}
 }

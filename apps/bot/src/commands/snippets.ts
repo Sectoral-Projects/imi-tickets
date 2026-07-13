@@ -1,13 +1,14 @@
 import { pageLines, replyComponents, requireGuildPermission, textComponent } from '@/lib/discord/staffCommand';
-import { BlockService } from '@/services/block';
+import { MessageTemplateService } from '@/services/messageTemplate';
+import { SettingsService } from '@/services/settings';
 import { ApplyOptions } from '@sapphire/decorators';
 import { Command } from '@sapphire/framework';
 import { ApplicationIntegrationType, InteractionContextType, Message } from 'discord.js';
 
 @ApplyOptions<Command.Options>({
-	description: 'Show blocked users and roles.'
+	description: 'List custom message templates with staff commands.'
 })
-export class BlockedCommand extends Command {
+export class SnippetsCommand extends Command {
 	public override registerApplicationCommands(registry: Command.Registry) {
 		registry.registerChatInputCommand({
 			name: this.name,
@@ -21,8 +22,8 @@ export class BlockedCommand extends Command {
 		if (!(await requireGuildPermission(interaction)))
 			return replyComponents(
 				interaction,
-				textComponent('Blocked', ['You do not have permission to view blocks.']),
-				{ fallback: 'You do not have permission to view blocks.' }
+				textComponent('Snippets', ['You do not have permission to view snippets.']),
+				{ fallback: 'You do not have permission to view snippets.' }
 			);
 		return this.replyList(interaction);
 	}
@@ -31,26 +32,31 @@ export class BlockedCommand extends Command {
 		if (!(await requireGuildPermission(message)))
 			return replyComponents(
 				message,
-				textComponent('Blocked', ['You do not have permission to view blocks.']),
-				{ fallback: 'You do not have permission to view blocks.' }
+				textComponent('Snippets', ['You do not have permission to view snippets.']),
+				{ fallback: 'You do not have permission to view snippets.' }
 			);
 		return this.replyList(message);
 	}
 
 	private async replyList(target: Message | Command.ChatInputCommandInteraction) {
-		const { entries } = BlockService.list({ limit: 50 });
+		const prefix = SettingsService.getCommandPrefix();
+		const snippets = MessageTemplateService.list()
+			.filter((template) => template.kind === 'custom' && template.enabled && template.staffCommand)
+			.sort((a, b) => (a.staffCommand ?? '').localeCompare(b.staffCommand ?? ''));
+
 		const { lines, totalPages } = pageLines(
-			entries,
-			(entry) => `**${entry.entityType.charAt(0).toUpperCase() + entry.entityType.slice(1)}** <@${entry.entityId}>${entry.reason ? ` — ${entry.reason}` : ''}`,
+			snippets,
+			(template) => `**${prefix}${template.staffCommand}** — ${template.name}`,
 			0,
 			10
 		);
+
 		return replyComponents(
 			target,
-			textComponent('Blocked', lines, {
-				kind: 'blocked',
+			textComponent('Snippets', lines.length ? lines : ['No enabled custom snippets with a staff command.'], {
+				kind: 'snippets',
 				page: 0,
-				totalPages
+				totalPages: Math.max(1, totalPages)
 			})
 		);
 	}

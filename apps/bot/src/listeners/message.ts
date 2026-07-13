@@ -271,7 +271,9 @@ export class MessageEvent extends Listener {
 				messageId: created.id,
 				url: attachment.url,
 				name: attachment.name ?? undefined,
-				isSpoiler: attachment.isSpoiler
+				isSpoiler: attachment.isSpoiler,
+				width: attachment.width,
+				height: attachment.height
 			});
 		}
 
@@ -283,7 +285,9 @@ export class MessageEvent extends Listener {
 				messageId: created.id,
 				url: media.url,
 				name: media.description,
-				isSpoiler: media.spoiler
+				isSpoiler: media.spoiler,
+				width: media.width,
+				height: media.height
 			});
 		}
 

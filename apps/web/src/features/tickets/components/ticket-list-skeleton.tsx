@@ -25,7 +25,10 @@ export function TicketListSkeleton() {
               </div>
             </CardHeader>
             <CardContent>
-              <Skeleton className="h-4 w-1/3" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-8 rounded-full" />
+                <Skeleton className="h-4 w-1/3" />
+              </div>
             </CardContent>
           </Card>
         ))}

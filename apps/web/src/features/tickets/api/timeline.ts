@@ -1,4 +1,8 @@
 import { api } from "@/lib/api";
+import {
+  TIMELINE_GROUP_LIMIT,
+  TIMELINE_WINDOW_GROUP_LIMIT,
+} from "@imi/tickets-shared";
 import type { TimelineResponse, TimelineWindowResponse } from "../schemas/timeline";
 import type { QueryFunctionContext } from "@tanstack/react-query";
 
@@ -8,14 +12,14 @@ export type TimelineWindowDirection = "older" | "newer";
 
 export type TimelineWindowParams =
   | {
-    messageId: number;
-    limit?: number;
-  }
+      messageId: number;
+      limit?: number;
+    }
   | {
-    windowCursor: string;
-    direction: TimelineWindowDirection;
-    limit?: number;
-  };
+      windowCursor: string;
+      direction: TimelineWindowDirection;
+      limit?: number;
+    };
 
 export const fetchTimeline = async ({
   pageParam = 0,
@@ -24,6 +28,7 @@ export const fetchTimeline = async ({
   const [, ticketId] = queryKey;
   const params = new URLSearchParams({
     cursor: String(pageParam),
+    limit: String(TIMELINE_GROUP_LIMIT),
   });
 
   return await api.get<TimelineResponse>(
@@ -44,7 +49,10 @@ export async function fetchTimelineWindow(
     query.set("direction", params.direction);
   }
 
-  if (params.limit) query.set("limit", String(params.limit));
+  query.set(
+    "limit",
+    String(params.limit ?? TIMELINE_WINDOW_GROUP_LIMIT),
+  );
 
   return await api.get<TimelineWindowResponse>(
     `/tickets/${ticketId}/timeline?${query}`,

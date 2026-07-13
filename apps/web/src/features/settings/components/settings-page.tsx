@@ -46,8 +46,10 @@ import {
   DmWordBlacklistEditor,
   wordFilterRulesEqual,
 } from "./dm-word-blacklist-editor";
+import { MultiSearchableSelect } from "@/components/multi-searchable-select";
 import { UnauthorizedScreen } from "@/components/unauthorized-screen";
 import { ApiError } from "@/lib/api";
+import type { NotifyOnNewThreadPresence } from "../schemas/settings";
 
 type SettingsDraft = {
   settings: AppSettings;
@@ -89,6 +91,12 @@ function SettingSwitchRow({
   );
 }
 
+function stringArraysEqual(left: string[] | undefined, right: string[] | undefined) {
+  const a = [...(left ?? [])].sort();
+  const b = [...(right ?? [])].sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export function SettingsContent() {
   const session = useAuthGate();
   const { data, isLoading, error } = useSettings(Boolean(session.data));
@@ -116,6 +124,9 @@ export function SettingsContent() {
         ticketOpenButtonMode: normalizeTicketOpenButtonMode(data.settings.ticketOpenButtonMode),
         forwardTemplateButtonsToStaff: data.settings.forwardTemplateButtonsToStaff ?? true,
         staffRoleAliases: data.settings.staffRoleAliases ?? [],
+        notifyOnNewThreadRoleIds: data.settings.notifyOnNewThreadRoleIds ?? [],
+        notifyOnNewThreadPresence:
+          data.settings.notifyOnNewThreadPresence ?? (["all"] as NotifyOnNewThreadPresence[]),
         commandPrefix: data.settings.commandPrefix ?? ";",
         privateMessagePrefix: data.settings.privateMessagePrefix ?? "`",
         dmWordBlacklist: data.settings.dmWordBlacklist ?? [],
@@ -188,6 +199,14 @@ export function SettingsContent() {
         Boolean(data.settings.autoTagClosedThreads) ||
       draft.settings.notifyOnNewThread !==
         Boolean(data.settings.notifyOnNewThread) ||
+      !stringArraysEqual(
+        draft.settings.notifyOnNewThreadRoleIds,
+        data.settings.notifyOnNewThreadRoleIds,
+      ) ||
+      !stringArraysEqual(
+        draft.settings.notifyOnNewThreadPresence,
+        data.settings.notifyOnNewThreadPresence ?? ["all"],
+      ) ||
       (draft.settings.closeAfterMinutes ?? null) !==
         (data.settings.closeAfterMinutes ?? null) ||
       (draft.settings.autoCloseReminderMinutes ?? null) !==
@@ -354,6 +373,9 @@ export function SettingsContent() {
             })),
             autoTagClosedThreads: draft.settings.autoTagClosedThreads,
             notifyOnNewThread: draft.settings.notifyOnNewThread,
+            notifyOnNewThreadRoleIds: draft.settings.notifyOnNewThreadRoleIds ?? [],
+            notifyOnNewThreadPresence:
+              draft.settings.notifyOnNewThreadPresence ?? (["all"] as NotifyOnNewThreadPresence[]),
             closeAfterMinutes: draft.settings.closeAfterMinutes ?? null,
             autoCloseReminderMinutes: autoCloseEnabled
               ? (draft.settings.autoCloseReminderMinutes ?? null)
@@ -733,13 +755,95 @@ export function SettingsContent() {
               <SettingSwitchRow
                 id="notify-new-thread"
                 label="Notify on new tickets"
-                description="Send a notification when a new ticket is opened."
+                description="Ping selected staff roles in the new ticket channel when a ticket opens."
                 checked={Boolean(draft.settings.notifyOnNewThread)}
                 disabled={readOnly || updateSettings.isPending}
                 onCheckedChange={(checked) =>
                   updateSetting("notifyOnNewThread", checked)
                 }
               />
+              {draft.settings.notifyOnNewThread ? (
+                <div className="flex flex-col gap-4 rounded-lg border border-border p-3">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="notify-roles">Roles to notify</Label>
+                    <MultiSearchableSelect
+                      options={roles.map((role) => ({
+                        value: role.id,
+                        label: role.name,
+                        keywords: role.id,
+                      }))}
+                      value={draft.settings.notifyOnNewThreadRoleIds ?? []}
+                      disabled={
+                        readOnly ||
+                        updateSettings.isPending ||
+                        !data?.primaryGuildId ||
+                        rolesLoading
+                      }
+                      placeholder={
+                        !data?.primaryGuildId
+                          ? "Link a primary server first"
+                          : rolesLoading
+                            ? "Loading roles…"
+                            : "Select roles"
+                      }
+                      searchPlaceholder="Search roles…"
+                      emptyText="No roles found."
+                      onValueChange={(roleIds) =>
+                        updateSetting("notifyOnNewThreadRoleIds", roleIds)
+                      }
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      With All statuses, these roles are pinged directly. With a
+                      presence filter, matching online members who hold any of these
+                      roles are pinged individually.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="notify-presence">Presence filter</Label>
+                    <MultiSearchableSelect
+                      options={[
+                        { value: "online", label: "Online" },
+                        { value: "idle", label: "Away" },
+                        { value: "dnd", label: "Do not disturb" },
+                        { value: "all", label: "All statuses" },
+                      ]}
+                      value={
+                        draft.settings.notifyOnNewThreadPresence ?? [
+                          "all" as NotifyOnNewThreadPresence,
+                        ]
+                      }
+                      disabled={readOnly || updateSettings.isPending}
+                      placeholder="Select presence statuses"
+                      searchPlaceholder="Search statuses…"
+                      emptyText="No statuses found."
+                      onValueChange={(statuses) => {
+                        const next = statuses as NotifyOnNewThreadPresence[];
+                        const prev = draft.settings.notifyOnNewThreadPresence ?? [
+                          "all" as NotifyOnNewThreadPresence,
+                        ];
+                        const addedAll =
+                          next.includes("all") && !prev.includes("all");
+                        const selectedSpecific = next.filter(
+                          (status) => status !== "all",
+                        );
+                        updateSetting(
+                          "notifyOnNewThreadPresence",
+                          addedAll
+                            ? (["all"] as NotifyOnNewThreadPresence[])
+                            : selectedSpecific.length > 0
+                              ? selectedSpecific
+                              : (["all"] as NotifyOnNewThreadPresence[]),
+                        );
+                      }}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      All statuses pings the selected roles. Other options ping only
+                      staff currently in those Discord statuses (requires Presence +
+                      Server Members intents).
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 

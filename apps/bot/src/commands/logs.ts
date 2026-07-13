@@ -27,15 +27,30 @@ export class LogsCommand extends Command {
 	}
 
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
-		if (!(await requireGuildPermission(interaction))) return interaction.reply({ content: 'You do not have permission to view logs.', ephemeral: true });
+		if (!(await requireGuildPermission(interaction)))
+			return replyComponents(
+				interaction,
+				textComponent('Logs', ['You do not have permission to view logs.']),
+				{ fallback: 'You do not have permission to view logs.' }
+			);
 		const user = interaction.options.getUser('user', true);
 		return this.replyLogs(interaction, user.id, user.tag);
 	}
 
 	public override async messageRun(message: Message) {
-		if (!(await requireGuildPermission(message))) return message.reply('You do not have permission to view logs.');
+		if (!(await requireGuildPermission(message)))
+			return replyComponents(
+				message,
+				textComponent('Logs', ['You do not have permission to view logs.']),
+				{ fallback: 'You do not have permission to view logs.' }
+			);
 		const user = message.mentions.users.first();
-		if (!user) return message.reply('Mention a member to look up.');
+		if (!user)
+			return replyComponents(
+				message,
+				textComponent('Logs', ['Mention a member to look up.']),
+				{ fallback: 'Mention a member to look up.' }
+			);
 		return this.replyLogs(message, user.id, user.tag);
 	}
 
