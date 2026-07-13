@@ -97,6 +97,7 @@ export abstract class MessageService {
 				.get();
 
 			TicketService.touchLastMessageAt(data.threadId, tx);
+			TicketService.clearScheduledClose(data.threadId, tx);
 
 			AuditService.log(
 				{
@@ -184,6 +185,7 @@ export abstract class MessageService {
 		return container.sqlite.transaction((tx) => {
 			const existing = tx.select().from(messages).where(eq(messages.id, id)).get();
 			if (!existing) return null;
+			if (existing.deletedAt) return existing;
 
 			const deleted = tx.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, id)).returning().get();
 
@@ -496,7 +498,7 @@ export abstract class MessageService {
 				authorId: target.authorId,
 				authorName,
 				authorAvatar: snapshot?.avatar ?? null,
-				content: target.deletedAt ? 'Original message was deleted' : target.content,
+				content: target.content,
 				deletedAt: target.deletedAt
 			});
 		}

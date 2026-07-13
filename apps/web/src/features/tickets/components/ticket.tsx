@@ -12,8 +12,6 @@ import { useParams, useSearchParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent } from "@/components/ui/marker";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
 import {
   formatHighlightedMessageIds,
   parseHighlightedMessageIds,
@@ -26,7 +24,7 @@ import { ticketStatusBadgeVariant } from "../utils/status-badge";
 import { resolveTicketDisplayTitle } from "../utils/display-title";
 import { TicketDetailSkeleton } from "./ticket-detail-skeleton";
 import { TicketHeaderParticipants } from "./ticket-header-participants";
-import { MessageTimelineRow } from "./ticket-message-row";
+import { MessageGroupCard } from "./message-group-card";
 import { useTimelineWindow } from "./hooks/use-timeline-window";
 import {
   useTimelineVirtualizer,
@@ -171,15 +169,10 @@ export function TicketContent() {
     // painted instead of blanking into a skeleton.
     return timelineData?.items ?? [];
   }, [windowState, timelineData?.items]);
-  const groupBreakBeforeKeys = useMemo(
-    () =>
-      new Set(
-        windowState?.groupBreakBeforeKeys ??
-          timelineData?.groupBreakBeforeKeys ??
-          [],
-      ),
-    [windowState?.groupBreakBeforeKeys, timelineData?.groupBreakBeforeKeys],
-  );
+  const timelineRenderItems = useMemo(() => {
+    if (windowState?.blocks) return windowState.blocks;
+    return timelineData?.blocks ?? [];
+  }, [windowState, timelineData?.blocks]);
   const bootstrappingHighlightWindow =
     openedWithHighlightDeepLink && hasHighlightedMode && !windowState;
   const contentReady =
@@ -199,14 +192,14 @@ export function TicketContent() {
   const {
     rowVirtualizer,
     virtualItems,
-    timelineRenderItems,
     findRenderIndexForMessage,
     handleTimelineScroll,
     updateJumpTargets,
     finishPendingHighlightScroll,
+    mediaColumnMaxWidth,
   } = useTimelineVirtualizer({
     displayedItems,
-    groupBreakBeforeKeys,
+    timelineRenderItems,
     scrollViewportRef,
     hasHighlightedMode,
     sortedHighlightedIds,
@@ -412,7 +405,7 @@ export function TicketContent() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-border p-4">
+      <header className="shrink-0 p-4">
         <h1 className="mb-2 text-lg font-semibold">{ticketDisplayTitle}</h1>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
@@ -456,11 +449,14 @@ export function TicketContent() {
       ) : null}
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <ScrollArea
-          className="size-full"
-          viewportClassName="[overflow-anchor:none] [overscroll-behavior:contain]"
-          viewportRef={scrollViewportRef}
-          onViewportScroll={handleTimelineScroll}
+        {/* Native overflow scroller — matches TanStack chat guide.
+            Base UI ScrollArea fought end-anchored prepend compensation.
+            React-owned sizer height (not directDomUpdates) so height grows in
+            the same commit before _willUpdate writes scrollTop. */}
+        <div
+          ref={scrollViewportRef}
+          className="size-full overflow-auto [overflow-anchor:none] [overscroll-behavior:contain]"
+          onScroll={handleTimelineScroll}
         >
           <div
             className="relative w-full"
@@ -470,20 +466,12 @@ export function TicketContent() {
               const item = timelineRenderItems[virtualItem.index];
               if (!item) return null;
 
-              const isGroupEnd =
-                item.kind === "audit" ||
-                (item.kind === "message" &&
-                  (item.groupPos === "solo" || item.groupPos === "end"));
-
               return (
                 <div
                   key={virtualItem.key}
                   ref={rowVirtualizer.measureElement}
                   data-index={virtualItem.index}
-                  className={cn(
-                    "absolute top-0 left-0 w-full px-4",
-                    isGroupEnd && "pb-4",
-                  )}
+                  className="absolute top-0 left-0 w-full px-4 pb-4"
                   style={{
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
@@ -494,25 +482,23 @@ export function TicketContent() {
                     </Marker>
                   )}
 
-                  {item.kind === "message" && (
-                    <MessageTimelineRow
-                      message={item.message}
-                      groupPos={item.groupPos}
+                  {item.kind === "messages" && (
+                    <MessageGroupCard
+                      messages={item.messages}
                       ticket={ticket}
-                      highlighted={highlightedMessageIds.has(item.message.id)}
-                      replyJumpFlashing={
-                        replyJumpFlashMessageId === item.message.id
-                      }
+                      highlightedMessageIds={highlightedMessageIds}
+                      replyJumpFlashMessageId={replyJumpFlashMessageId}
                       onToggleHighlight={toggleHighlight}
                       onScrollToMessage={scrollToReplyTarget}
                       currentUserId={currentUserId}
+                      mediaMaxWidthPx={mediaColumnMaxWidth}
                     />
                   )}
                 </div>
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
         {(isFetchingNextPage || windowPagingDirection === "older") && (
           <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">

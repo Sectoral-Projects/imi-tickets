@@ -13,6 +13,9 @@ const COMMANDS = [
 	['blocked', 'Show blocked users and roles.'],
 	['unblock', 'Remove a user or role block.'],
 	['rename', 'Rename the ticket channel or forum post.'],
+	['close', 'Close the ticket, optionally after a time (e.g. close 24h).'],
+	['snippets', 'List custom message templates with staff commands.'],
+	['autoclose', 'Toggle inactivity auto-close for this ticket (on/off).'],
 	['about', 'Show bot information.'],
 	['help', 'Show this command list.']
 ] as const;
@@ -31,12 +34,22 @@ export class HelpCommand extends Command {
 	}
 
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
-		if (!(await requireGuildPermission(interaction))) return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+		if (!(await requireGuildPermission(interaction)))
+			return replyComponents(
+				interaction,
+				textComponent('Help', ['You do not have permission to use this command.']),
+				{ fallback: 'You do not have permission to use this command.' }
+			);
 		return this.replyHelp(interaction);
 	}
 
 	public override async messageRun(message: Message) {
-		if (!(await requireGuildPermission(message))) return message.reply('You do not have permission to use this command.');
+		if (!(await requireGuildPermission(message)))
+			return replyComponents(
+				message,
+				textComponent('Help', ['You do not have permission to use this command.']),
+				{ fallback: 'You do not have permission to use this command.' }
+			);
 		return this.replyHelp(message);
 	}
 

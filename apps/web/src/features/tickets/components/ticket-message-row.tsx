@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Lock } from "lucide-react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { EnrichedMessage } from "../schemas/messages";
@@ -11,6 +12,7 @@ import { MessageMedia } from "./message-media";
 import { MessageMarkdown } from "./message-markdown";
 import { MessageCopyMenu } from "./message-copy-menu";
 import { MessageEditIndicator } from "./message-edit-indicator";
+import { MessageDeletedIndicator } from "./message-deleted-indicator";
 import { MessageReactions } from "./message-reactions";
 import {
   MessageReplyLeadingColumn,
@@ -23,7 +25,9 @@ import {
   dedupeEmbedVideoAttachments,
   isEmbedVideoAttachment,
   shouldRenderInlineMedia,
+  TRANSCRIPT_FORWARDED_MEDIA_INSET_PX,
 } from "../utils/message-media";
+import { mediaMaxWidthForGroupPos } from "../utils/timeline/estimate-row-size";
 
 // --- Surface styling ---
 
@@ -56,9 +60,34 @@ function messageGroupShellClass(groupPos: MessageGroupPos) {
   }
 }
 
+export function MessageGroupShell({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative rounded-xl border border-border bg-card",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 // --- Sub-components ---
 
-function MessageBody({ message }: { message: EnrichedMessage }) {
+function MessageBody({
+  message,
+  mediaMaxWidthPx,
+}: {
+  message: EnrichedMessage;
+  mediaMaxWidthPx?: number;
+}) {
   const embedVideoAttachments = dedupeEmbedVideoAttachments(
     message.attachments.filter(isEmbedVideoAttachment),
   );
@@ -73,6 +102,10 @@ function MessageBody({ message }: { message: EnrichedMessage }) {
       !isEmbedVideoAttachment(attachment),
   );
   const hasTextContent = message.content.trim().length > 0;
+  const inlineMaxWidthPx =
+    mediaMaxWidthPx != null && message.isForwarded
+      ? Math.max(1, mediaMaxWidthPx - TRANSCRIPT_FORWARDED_MEDIA_INSET_PX)
+      : mediaMaxWidthPx;
 
   return (
     <>
@@ -96,7 +129,11 @@ function MessageBody({ message }: { message: EnrichedMessage }) {
           )}
         >
           {inlineAttachments.map((attachment) => (
-            <MessageMedia key={attachment.id} attachment={attachment} />
+            <MessageMedia
+              key={attachment.id}
+              attachment={attachment}
+              maxWidthPx={inlineMaxWidthPx}
+            />
           ))}
         </div>
       )}
@@ -130,16 +167,22 @@ function MessageBody({ message }: { message: EnrichedMessage }) {
   );
 }
 
-function MessageContent({ message }: { message: EnrichedMessage }) {
+function MessageContent({
+  message,
+  mediaMaxWidthPx,
+}: {
+  message: EnrichedMessage;
+  mediaMaxWidthPx?: number;
+}) {
   if (message.isForwarded) {
     return (
       <ForwardedMessageFrame>
-        <MessageBody message={message} />
+        <MessageBody message={message} mediaMaxWidthPx={mediaMaxWidthPx} />
       </ForwardedMessageFrame>
     );
   }
 
-  return <MessageBody message={message} />;
+  return <MessageBody message={message} mediaMaxWidthPx={mediaMaxWidthPx} />;
 }
 
 function MessageRowCopyAction({ content }: { content: string }) {
@@ -177,6 +220,8 @@ export function MessageTimelineRow({
   onToggleHighlight,
   onScrollToMessage,
   currentUserId,
+  mediaMaxWidthPx,
+  renderShell = true,
 }: {
   message: EnrichedMessage;
   groupPos: MessageGroupPos;
@@ -188,6 +233,9 @@ export function MessageTimelineRow({
   onToggleHighlight: (messageId: number) => void;
   onScrollToMessage: (messageId: number) => void;
   currentUserId?: string | null;
+  mediaMaxWidthPx?: number;
+  /** When false, omit per-message card chrome (used inside MessageGroupCard). */
+  renderShell?: boolean;
 }) {
   const isLead = groupPos === "solo" || groupPos === "start";
   const isSystemMessage = isSystemTranscriptMessage(message.authorId);
@@ -201,14 +249,24 @@ export function MessageTimelineRow({
     : (message.author?.username ??
       message.author?.globalName ??
       message.authorId);
+  const rowMediaMaxWidth =
+    mediaMaxWidthPx != null
+      ? mediaMaxWidthForGroupPos(mediaMaxWidthPx, groupPos)
+      : undefined;
 
-  return (
-    <div className={cn("relative", messageGroupShellClass(groupPos))}>
+  const content = (
+    <>
       {isLead ? (
         <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
           {message.isPrivateStaff ? <PrivateMessageBadge /> : null}
           <Badge
-            variant={sourceLabel === "DM" ? "secondary" : sourceLabel == "Staff" ? "default" : "outline"}
+            variant={
+              sourceLabel === "DM"
+                ? "secondary"
+                : sourceLabel == "Staff"
+                  ? "default"
+                  : "outline"
+            }
             className="h-5 px-2 text-[10px] font-semibold tracking-wide uppercase"
           >
             {sourceLabel}
@@ -267,11 +325,15 @@ export function MessageTimelineRow({
               <span className="text-xs text-muted-foreground">
                 {new Date(message.createdAt).toLocaleString()}
               </span>
+              <MessageDeletedIndicator message={message} />
               <MessageEditIndicator message={message} />
             </div>
 
             <div className="mt-1">
-              <MessageContent message={message} />
+              <MessageContent
+                message={message}
+                mediaMaxWidthPx={rowMediaMaxWidth}
+              />
               <MessageReactions
                 reactions={message.reactions}
                 currentUserId={currentUserId}
@@ -302,9 +364,11 @@ export function MessageTimelineRow({
           <div className="relative min-w-0 flex-1">
             {message.revision > 1 ||
             message.updatedAt ||
+            message.deletedAt ||
             message.isPrivateStaff ? (
               <div className="absolute right-0 top-0 flex items-center gap-2">
                 {message.isPrivateStaff ? <PrivateMessageBadge /> : null}
+                <MessageDeletedIndicator message={message} />
                 {message.revision > 1 || message.updatedAt ? (
                   <MessageEditIndicator message={message} />
                 ) : null}
@@ -316,7 +380,10 @@ export function MessageTimelineRow({
                 onJump={onScrollToMessage}
               />
             ) : null}
-            <MessageContent message={message} />
+            <MessageContent
+              message={message}
+              mediaMaxWidthPx={rowMediaMaxWidth}
+            />
             <MessageReactions
               reactions={message.reactions}
               currentUserId={currentUserId}
@@ -325,6 +392,16 @@ export function MessageTimelineRow({
           <MessageRowCopyAction content={message.content} />
         </div>
       )}
+    </>
+  );
+
+  if (!renderShell) {
+    return <div className="relative">{content}</div>;
+  }
+
+  return (
+    <div className={cn("relative", messageGroupShellClass(groupPos))}>
+      {content}
     </div>
   );
 }

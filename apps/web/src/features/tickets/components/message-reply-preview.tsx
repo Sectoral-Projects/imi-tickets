@@ -66,7 +66,7 @@ export function MessageReplySnippet({
 }) {
   const authorLabel = replyTo.authorName ?? "Unknown user";
   const isDeleted = Boolean(replyTo.deletedAt);
-  const preview = isDeleted ? "Original message was deleted" : truncateReplyContent(replyTo.content);
+  const preview = truncateReplyContent(replyTo.content);
   const avatarUrl = replyAuthorAvatarUrl(replyTo);
 
   return (
@@ -95,7 +95,7 @@ export function MessageReplySnippet({
           isDeleted && "italic",
         )}
       >
-        {preview}
+        {isDeleted ? `(deleted) ${preview}` : preview}
       </span>
     </button>
   );

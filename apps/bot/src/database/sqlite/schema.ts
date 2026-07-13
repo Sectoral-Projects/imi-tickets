@@ -25,6 +25,8 @@ export const config = sqliteTable("config", {
 	settings: text("settings", { mode: "json" }).$type<{
 		autoTagClosedThreads?: boolean;
 		notifyOnNewThread?: boolean;
+		notifyOnNewThreadRoleIds?: string[];
+		notifyOnNewThreadPresence?: Array<'online' | 'idle' | 'dnd' | 'all'>;
 		/** When true, staff typing in a ticket channel triggers sendTyping() in the member DM. */
 		relayStaffTypingToMember?: boolean;
 		/** When true, staff relay messages to members omit the staff username. */
@@ -237,6 +239,10 @@ export const threads = sqliteTable("threads", {
 	autoCloseReminderForLastMessageAt: integer("auto_close_reminder_for_last_message_at", {
 		mode: "timestamp"
 	}),
+	/** Staff-scheduled close deadline (`;close 24h`). Cleared when any message is recorded. */
+	scheduledCloseAt: integer("scheduled_close_at", { mode: "timestamp" }),
+	/** When true, inactivity auto-close/reminders skip this ticket. */
+	autoCloseDisabled: integer("auto_close_disabled", { mode: "boolean" }).notNull().default(false),
 	createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 	closedAt: integer("closed_at", { mode: "timestamp" }),
 	deletedAt: integer("deleted_at", { mode: "timestamp" })
@@ -309,6 +315,8 @@ export const attachments = sqliteTable(
 		url: text("url").notNull(),
 		name: text("name"),
 		isSpoiler: integer("is_spoiler", { mode: "boolean" }).notNull().default(false),
+		width: integer("width"),
+		height: integer("height"),
 		createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 		deletedAt: integer("deleted_at", { mode: "timestamp" })
 	},

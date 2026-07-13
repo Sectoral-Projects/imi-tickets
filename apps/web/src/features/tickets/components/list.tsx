@@ -14,10 +14,12 @@ import {
 } from "@/components/ui/select";
 import { Link } from "react-router";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthGate, useProductAccessRedirect } from "@/lib/use-auth-gate";
 import { useRealtime } from "@/lib/use-realtime";
 import { useClientPreferences } from "@/features/settings/hooks/settings";
 import { TicketListSkeleton } from "./ticket-list-skeleton";
+import { AuthorHoverCard } from "./author-hover-card";
 import { ticketStatusBadgeVariant } from "../utils/status-badge";
 import { formatTicketListTitle } from "../utils/display-title";
 import { UnauthorizedScreen } from "@/components/unauthorized-screen";
@@ -247,6 +249,22 @@ export function TicketList() {
   );
 }
 
+function ticketOpenerLabel(ticket: EnrichedTicket) {
+  return (
+    ticket.user?.nickname ??
+    ticket.user?.globalName ??
+    ticket.user?.username ??
+    ticket.userId
+  );
+}
+
+function ticketOpenerAvatarUrl(ticket: EnrichedTicket) {
+  const avatar = ticket.user?.avatar;
+  const userId = ticket.user?.userId ?? ticket.userId;
+  if (!avatar) return undefined;
+  return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`;
+}
+
 function TicketListItem({
   ticket,
   useChannelNameForTranscript,
@@ -254,34 +272,48 @@ function TicketListItem({
   ticket: EnrichedTicket;
   useChannelNameForTranscript: boolean;
 }) {
+  const title = formatTicketListTitle(ticket, { useChannelNameForTranscript });
+  const openerLabel = ticketOpenerLabel(ticket);
+  const openerInitials = openerLabel.slice(0, 2).toUpperCase();
+
   return (
-    <Link to={`/${ticket.id}`}>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="text-lg font-medium">
-              {formatTicketListTitle(ticket, { useChannelNameForTranscript })}
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge
-                variant={ticketStatusBadgeVariant(ticket.status)}
-                className="text-sm capitalize"
-              >
-                {ticket.status}
-              </Badge>
-            </div>
+    <Card className="relative transition-colors hover:bg-muted/40">
+      <Link
+        to={`/${ticket.id}`}
+        className="absolute inset-0 z-0 rounded-[inherit]"
+        aria-label={`Open ticket ${title}`}
+      />
+      <CardHeader className="relative z-10 pointer-events-none">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 text-lg font-medium">{title}</div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge
+              variant={ticketStatusBadgeVariant(ticket.status)}
+              className="text-sm capitalize"
+            >
+              {ticket.status}
+            </Badge>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2">
-            <div className="text-sm">
-              {ticket.user?.nickname ??
-                ticket.user?.globalName ??
-                ticket.userId}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+        </div>
+      </CardHeader>
+      <CardContent className="relative z-10 pointer-events-none">
+        <div className="pointer-events-auto w-fit max-w-full">
+          <AuthorHoverCard userId={ticket.userId}>
+            <span className="inline-flex max-w-full items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Avatar className="size-8">
+                <AvatarImage
+                  src={ticketOpenerAvatarUrl(ticket)}
+                  alt={openerLabel}
+                />
+                <AvatarFallback className="text-xs">{openerInitials}</AvatarFallback>
+              </Avatar>
+              <span className="truncate text-sm text-muted-foreground">
+                {openerLabel}
+              </span>
+            </span>
+          </AuthorHoverCard>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

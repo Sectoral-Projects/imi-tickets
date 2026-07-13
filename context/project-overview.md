@@ -8,9 +8,9 @@ The product currently spans a pnpm monorepo with two apps and a shared package:
 
 | Path | Owns |
 | --- | --- |
-| `g:/Programming/nw-modmail/apps/bot` | Discord bot, Hono API, Better Auth server, SQLite/Drizzle data model, services, commands, listeners, Discord component templates (`@imi/tickets-bot`) |
-| `g:/Programming/nw-modmail/apps/web` | Vite React staff UI, route shells, ticket list/detail screens, Better Auth client, TanStack Query hooks, shadcn UI primitives (`@imi/tickets-web`) |
-| `g:/Programming/nw-modmail/packages/shared` | Shared display-title helpers, Zod ticket schemas, message/timeline types, realtime event union (`@imi/tickets-shared`) |
+| `/apps/bot` | Discord bot, Hono API, Better Auth server, SQLite/Drizzle data model, services, commands, listeners, Discord component templates (`@imi/tickets-bot`) |
+| `/apps/web` | Vite React staff UI, route shells, ticket list/detail screens, Better Auth client, TanStack Query hooks, shadcn UI primitives (`@imi/tickets-web`) |
+| `/packages/shared` | Shared display-title helpers, Zod ticket schemas, message/timeline types, realtime event union (`@imi/tickets-shared`) |
 
 ## Problem It Solves
 
@@ -99,7 +99,7 @@ Expected flow:
 - Link a primary Discord server from the signed-in user's Discord OAuth guild list.
 - Link any additional Discord servers that should be watched.
 - Run the bot invite flow as needed for each server, then recheck bot presence.
-- Ask how ticket channels should be handled, choosing exactly one strategy: Discord category channels or Discord forum-channel posts.
+- Ask how ticket channels should be handled, choosing exactly one strategy on the primary server: Discord category channels or Discord forum-channel posts. Affiliated servers are watched for staff identity/RBAC but do not get their own ticket routing.
 - Ask which Discord roles count as staff for each server.
 - Store modular role permissions so roles can grant `READ` only, `READ` plus `MANAGE`, or future permissions.
 - After completion, return users to the normal app layout and pages.
@@ -113,7 +113,7 @@ The SQLite schema in `apps/bot/src/database/sqlite/schema.ts` includes:
 - `messages`: Discord message records.
 - `member_snapshots`: captured Discord identity data.
 - `notes`: staff notes.
-- `attachments`: message or note attachments.
+- `attachments`: message or note attachments (optional `width`/`height` from Discord for media layout estimates).
 - `thread_tags`: ticket tags.
 - `thread_status_history`: lifecycle history.
 - `audit_log`: durable audit entries.

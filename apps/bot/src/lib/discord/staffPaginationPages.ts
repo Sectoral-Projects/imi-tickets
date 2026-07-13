@@ -1,7 +1,9 @@
 import { paginatedTextComponent } from '@/lib/discord/staffPagination';
 import { pageLines } from '@/lib/discord/staffCommand';
 import { BlockService } from '@/services/block';
+import { MessageTemplateService } from '@/services/messageTemplate';
 import { RbacPermission, RbacService } from '@/services/rbac';
+import { SettingsService } from '@/services/settings';
 import { TicketService } from '@/services/ticket';
 import { ticketAppUrl } from '@/lib/discord/userDisplay';
 import type { StaffPageKind } from '@/lib/discord/staffPagination';
@@ -14,6 +16,9 @@ const COMMANDS = [
 	['block', 'Block a user or role from tickets and bot commands.'],
 	['blocked', 'Show blocked users and roles.'],
 	['unblock', 'Remove a user or role block.'],
+	['close', 'Close the ticket, optionally after a time (e.g. close 24h).'],
+	['snippets', 'List custom message templates with staff commands.'],
+	['autoclose', 'Toggle inactivity auto-close for this ticket (on/off).'],
 	['about', 'Show bot information.'],
 	['help', 'Show this command list.']
 ] as const;
@@ -44,6 +49,23 @@ export function renderStaffPage(kind: StaffPageKind, page: number, context?: str
 				10
 			);
 			return paginatedTextComponent('Blocked users and roles', lines, { kind, page, totalPages });
+		}
+		case 'snippets': {
+			const prefix = SettingsService.getCommandPrefix();
+			const snippets = MessageTemplateService.list()
+				.filter((template) => template.kind === 'custom' && template.enabled && template.staffCommand)
+				.sort((a, b) => (a.staffCommand ?? '').localeCompare(b.staffCommand ?? ''));
+			const { lines, totalPages } = pageLines(
+				snippets,
+				(template) => `• **${prefix}${template.staffCommand}** — ${template.name}`,
+				page,
+				10
+			);
+			return paginatedTextComponent(
+				'Snippets',
+				lines.length ? lines : ['No enabled custom snippets with a staff command.'],
+				{ kind, page, totalPages: Math.max(1, totalPages) }
+			);
 		}
 		case 'help': {
 			const { lines, totalPages } = pageLines(

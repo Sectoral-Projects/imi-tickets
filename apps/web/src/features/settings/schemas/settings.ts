@@ -14,11 +14,24 @@ export const wordFilterRuleSchema = z.object({
 
 export type WordFilterRule = z.infer<typeof wordFilterRuleSchema>;
 
+export const notifyOnNewThreadPresenceSchema = z.enum([
+  "online",
+  "idle",
+  "dnd",
+  "all",
+]);
+
+export type NotifyOnNewThreadPresence = z.infer<
+  typeof notifyOnNewThreadPresenceSchema
+>;
+
 export const appSettingsSchema = z.object({
   closeAfterMinutes: z.number().positive().optional(),
   autoCloseReminderMinutes: z.number().positive().optional(),
   autoTagClosedThreads: z.boolean().optional(),
   notifyOnNewThread: z.boolean().optional(),
+  notifyOnNewThreadRoleIds: z.array(z.string().min(1)).optional(),
+  notifyOnNewThreadPresence: z.array(notifyOnNewThreadPresenceSchema).optional(),
   relayStaffTypingToMember: z.boolean().optional(),
   anonymousStaff: z.boolean().optional(),
   staffRoleAliases: z.array(staffRoleAliasSchema).optional(),
@@ -109,6 +122,8 @@ export const updateSettingsSchema = z.object({
       autoCloseReminderMinutes: z.number().positive().nullable().optional(),
       autoTagClosedThreads: z.boolean().optional(),
       notifyOnNewThread: z.boolean().optional(),
+      notifyOnNewThreadRoleIds: z.array(z.string().min(1)).optional(),
+      notifyOnNewThreadPresence: z.array(notifyOnNewThreadPresenceSchema).optional(),
       relayStaffTypingToMember: z.boolean().optional(),
       anonymousStaff: z.boolean().optional(),
       staffRoleAliases: z.array(staffRoleAliasSchema).optional(),

@@ -3,6 +3,15 @@ import type { EnrichedMessage } from "./messages";
 export const MESSAGE_GROUP_WINDOW_MS = 2 * 60 * 1000;
 export const MAX_ADJACENT_GROUP_MESSAGES = 30;
 
+/** Full-transcript infinite-scroll page size in complete groups. */
+export const TIMELINE_GROUP_LIMIT = 15;
+
+/** Highlight / reply window: groups before and after the anchor. */
+export const TIMELINE_WINDOW_GROUP_LIMIT = 8;
+
+/** Hard cap on rows returned in one page (guards max-size chains). */
+export const MAX_TIMELINE_ROWS_PER_PAGE = 90;
+
 export type AdjacentMessageGroupCandidate = {
   authorId: string | null;
   channelId: string | null;
@@ -35,6 +44,82 @@ export function canGroupAdjacentMessages(
   return elapsed >= 0 && elapsed <= MESSAGE_GROUP_WINDOW_MS;
 }
 
+/**
+ * Take up to `groupLimit` complete groups from a prefetched row buffer.
+ * Audits (and any row where `isSingletonGroup` is true) are one group each.
+ * Message chains continue while `canContinueGroup(edge, candidate)` is true,
+ * capped at `MAX_ADJACENT_GROUP_MESSAGES` per chain and `maxRows` overall.
+ */
+export function takeCompleteGroups<T>(
+  rows: readonly T[],
+  groupLimit: number,
+  canContinueGroup: (currentEdge: T, candidate: T) => boolean,
+  isSingletonGroup: (row: T) => boolean,
+  maxRows = MAX_TIMELINE_ROWS_PER_PAGE,
+  maxMessagesPerGroup = MAX_ADJACENT_GROUP_MESSAGES,
+) {
+  if (rows.length === 0 || groupLimit <= 0 || maxRows <= 0) return [] as T[];
+
+  const page: T[] = [];
+  let groupsTaken = 0;
+  let index = 0;
+
+  while (
+    index < rows.length &&
+    groupsTaken < groupLimit &&
+    page.length < maxRows
+  ) {
+    const head = rows[index];
+    if (head === undefined) break;
+
+    page.push(head);
+    index += 1;
+
+    if (isSingletonGroup(head)) {
+      groupsTaken += 1;
+      continue;
+    }
+
+    let messagesInGroup = 1;
+    while (
+      index < rows.length &&
+      page.length < maxRows &&
+      messagesInGroup < maxMessagesPerGroup
+    ) {
+      const edge = page.at(-1);
+      const candidate = rows[index];
+      if (
+        edge === undefined ||
+        candidate === undefined ||
+        isSingletonGroup(candidate) ||
+        !canContinueGroup(edge, candidate)
+      ) {
+        break;
+      }
+
+      page.push(candidate);
+      index += 1;
+      messagesInGroup += 1;
+    }
+
+    groupsTaken += 1;
+  }
+
+  return page;
+}
+
+/** SQL / buffer size: enough rows for `groupLimit` max-size groups, plus one. */
+export function timelineGroupFetchRowLimit(
+  groupLimit: number,
+  maxRows = MAX_TIMELINE_ROWS_PER_PAGE,
+) {
+  return Math.min(groupLimit * MAX_ADJACENT_GROUP_MESSAGES, maxRows) + 1;
+}
+
+/**
+ * @deprecated Prefer `takeCompleteGroups` for group-based paging.
+ * Kept for callers that still extend a fixed row page to a group edge.
+ */
 export function completePageAtGroupBoundary<T>(
   rows: readonly T[],
   baseLimit: number,

@@ -45,43 +45,59 @@ export abstract class AutoCloseService {
 	private static getNextDelayMs(db: DbClient): number | null {
 		const settings = SettingsService.getAppSettings(db);
 		const closeAfterMinutes = settings.closeAfterMinutes;
-		if (!closeAfterMinutes || closeAfterMinutes <= 0) return null;
-
 		const now = Date.now();
-		const closeAfterMs = closeAfterMinutes * 60_000;
 		let nextAt: number | null = null;
 
-		const closeRow = db.get<{ at: number | null }>(sql`
-			SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${closeAfterMs}) AS at
+		const scheduledRow = db.get<{ at: number | null }>(sql`
+			SELECT MIN(CAST(strftime('%s', ${threads.scheduledCloseAt}) AS INTEGER) * 1000) AS at
 			FROM ${threads}
 			WHERE ${threads.status} = ${ThreadStatus.Open}
 				AND ${threads.deletedAt} IS NULL
-				AND ${threads.lastMessageAt} IS NOT NULL
+				AND ${threads.scheduledCloseAt} IS NOT NULL
 		`);
+		if (scheduledRow?.at) nextAt = scheduledRow.at;
 
-		if (closeRow?.at) nextAt = closeRow.at;
+		if (closeAfterMinutes && closeAfterMinutes > 0) {
+			const closeAfterMs = closeAfterMinutes * 60_000;
 
-		const reminderMinutes = settings.autoCloseReminderMinutes;
-		if (reminderMinutes && reminderMinutes > 0 && reminderMinutes < closeAfterMinutes) {
-			const remindLeadMs = closeAfterMs - reminderMinutes * 60_000;
-			const remindRow = db.get<{ at: number | null }>(sql`
-				SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${remindLeadMs}) AS at
+			const closeRow = db.get<{ at: number | null }>(sql`
+				SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${closeAfterMs}) AS at
 				FROM ${threads}
 				WHERE ${threads.status} = ${ThreadStatus.Open}
 					AND ${threads.deletedAt} IS NULL
 					AND ${threads.lastMessageAt} IS NOT NULL
-					AND (
-						${threads.autoCloseReminderForLastMessageAt} IS NULL
-						OR ${threads.autoCloseReminderForLastMessageAt} != ${threads.lastMessageAt}
-					)
+					AND ${threads.autoCloseDisabled} = 0
 			`);
 
-			if (remindRow?.at) {
-				nextAt = nextAt ? Math.min(nextAt, remindRow.at) : remindRow.at;
+			if (closeRow?.at) {
+				nextAt = nextAt ? Math.min(nextAt, closeRow.at) : closeRow.at;
+			}
+
+			const reminderMinutes = settings.autoCloseReminderMinutes;
+			if (reminderMinutes && reminderMinutes > 0 && reminderMinutes < closeAfterMinutes) {
+				const remindLeadMs = closeAfterMs - reminderMinutes * 60_000;
+				const remindRow = db.get<{ at: number | null }>(sql`
+					SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${remindLeadMs}) AS at
+					FROM ${threads}
+					WHERE ${threads.status} = ${ThreadStatus.Open}
+						AND ${threads.deletedAt} IS NULL
+						AND ${threads.lastMessageAt} IS NOT NULL
+						AND ${threads.autoCloseDisabled} = 0
+						AND (
+							${threads.autoCloseReminderForLastMessageAt} IS NULL
+							OR ${threads.autoCloseReminderForLastMessageAt} != ${threads.lastMessageAt}
+						)
+				`);
+
+				if (remindRow?.at) {
+					nextAt = nextAt ? Math.min(nextAt, remindRow.at) : remindRow.at;
+				}
 			}
 		}
 
-		if (!nextAt) return MAX_POLL_MS;
+		if (!nextAt) {
+			return closeAfterMinutes && closeAfterMinutes > 0 ? MAX_POLL_MS : null;
+		}
 
 		const delay = nextAt - now;
 		if (delay <= 0) return 0;
@@ -90,12 +106,38 @@ export abstract class AutoCloseService {
 	}
 
 	static async tick(db: DbClient = container.sqlite) {
+		await this.processDueScheduledCloses(db);
+
 		const settings = SettingsService.getAppSettings(db);
 		const closeAfterMinutes = settings.closeAfterMinutes;
 		if (!closeAfterMinutes || closeAfterMinutes <= 0) return;
 
 		await this.processDueCloses(db, closeAfterMinutes);
 		await this.processDueReminders(db, settings);
+	}
+
+	private static async processDueScheduledCloses(db: DbClient) {
+		const now = new Date();
+		const due = db
+			.select({ id: threads.id })
+			.from(threads)
+			.where(
+				and(
+					eq(threads.status, ThreadStatus.Open),
+					isNull(threads.deletedAt),
+					isNotNull(threads.scheduledCloseAt),
+					lte(threads.scheduledCloseAt, now)
+				)
+			)
+			.all();
+
+		for (const row of due) {
+			await TicketCloseService.close({
+				threadId: row.id,
+				executedBy: 'system',
+				reason: 'Scheduled close'
+			});
+		}
 	}
 
 	private static async processDueCloses(db: DbClient, closeAfterMinutes: number) {
@@ -109,6 +151,7 @@ export abstract class AutoCloseService {
 				and(
 					eq(threads.status, ThreadStatus.Open),
 					isNull(threads.deletedAt),
+					eq(threads.autoCloseDisabled, false),
 					isNotNull(threads.lastMessageAt),
 					lte(threads.lastMessageAt, closeCutoff)
 				)
@@ -147,6 +190,7 @@ export abstract class AutoCloseService {
 				and(
 					eq(threads.status, ThreadStatus.Open),
 					isNull(threads.deletedAt),
+					eq(threads.autoCloseDisabled, false),
 					isNotNull(threads.lastMessageAt),
 					lte(threads.lastMessageAt, remindCutoff),
 					gt(threads.lastMessageAt, closeCutoff),

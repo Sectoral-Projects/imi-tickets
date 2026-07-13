@@ -17,12 +17,22 @@ export class AboutCommand extends Command {
 	}
 
 	public override async chatInputRun(interaction: Command.ChatInputCommandInteraction) {
-		if (!(await requireGuildPermission(interaction))) return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+		if (!(await requireGuildPermission(interaction)))
+			return replyComponents(
+				interaction,
+				textComponent('About', ['You do not have permission to use this command.']),
+				{ fallback: 'You do not have permission to use this command.' }
+			);
 		return this.replyAbout(interaction);
 	}
 
 	public override async messageRun(message: Message) {
-		if (!(await requireGuildPermission(message))) return message.reply('You do not have permission to use this command.');
+		if (!(await requireGuildPermission(message)))
+			return replyComponents(
+				message,
+				textComponent('About', ['You do not have permission to use this command.']),
+				{ fallback: 'You do not have permission to use this command.' }
+			);
 		return this.replyAbout(message);
 	}
 

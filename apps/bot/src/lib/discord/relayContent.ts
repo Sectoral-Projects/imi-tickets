@@ -13,12 +13,16 @@ export type RelayMediaItem = {
 	url: string;
 	description?: string;
 	spoiler?: boolean;
+	width?: number | null;
+	height?: number | null;
 };
 
 export type RelayAttachmentItem = {
 	url: string;
 	name?: string | null;
 	isSpoiler?: boolean;
+	width?: number | null;
+	height?: number | null;
 };
 
 export type RelayContent = {
@@ -105,7 +109,7 @@ function extractFromSource(
 		attachments.push(item);
 
 		const mediaItem = toMediaItemFromAttachment(attachment);
-		if (mediaItem) media.set(mediaItem.url, mediaItem);
+		if (mediaItem) upsertMedia(media, mediaItem);
 	}
 
 	for (const embed of source.embeds ?? []) {
@@ -119,15 +123,17 @@ function extractFromSource(
 		if (embedText) textParts.push(embedText);
 
 		const mediaItem = toMediaItemFromEmbed(embed);
-		if (mediaItem) media.set(mediaItem.url, mediaItem);
+		if (mediaItem) upsertMedia(media, mediaItem);
 	}
 }
 
 function toAttachmentItem(attachment: Attachment): RelayAttachmentItem {
+	const dims = normalizeMediaDimensions(attachment.width, attachment.height);
 	return {
 		url: attachment.url,
 		name: attachment.name,
-		isSpoiler: attachment.spoiler ?? false
+		isSpoiler: attachment.spoiler ?? false,
+		...dims
 	};
 }
 
@@ -139,10 +145,12 @@ function toMediaItemFromAttachment(attachment: Attachment): RelayMediaItem | nul
 		IMAGE_EXTENSION_PATTERN.test(attachment.url) ||
 		VIDEO_EXTENSION_PATTERN.test(attachment.url)
 	) {
+		const dims = normalizeMediaDimensions(attachment.width, attachment.height);
 		return {
 			url: attachment.url,
 			description: attachment.name ?? undefined,
-			spoiler: attachment.spoiler ?? false
+			spoiler: attachment.spoiler ?? false,
+			...dims
 		};
 	}
 
@@ -154,19 +162,23 @@ function toMediaItemFromEmbed(embed: Embed): RelayMediaItem | null {
 		return null;
 	}
 
-	const imageUrl = embed.image?.url ?? embed.thumbnail?.url;
-	if (imageUrl) {
+	const image = embed.image ?? embed.thumbnail;
+	if (image?.url) {
+		const dims = normalizeMediaDimensions(image.width, image.height);
 		return {
-			url: imageUrl,
-			description: embed.title ?? embed.description ?? undefined
+			url: image.url,
+			description: embed.title ?? embed.description ?? undefined,
+			...dims
 		};
 	}
 
-	const videoUrl = embed.video?.url;
-	if (videoUrl) {
+	const video = embed.video;
+	if (video?.url) {
+		const dims = normalizeMediaDimensions(video.width, video.height);
 		return {
-			url: videoUrl,
-			description: embed.title ?? embed.description ?? undefined
+			url: video.url,
+			description: embed.title ?? embed.description ?? undefined,
+			...dims
 		};
 	}
 
@@ -178,13 +190,54 @@ function formatEmbedText(embed: Embed) {
 	return parts.join('\n').trim();
 }
 
-function dedupeAttachments(items: RelayAttachmentItem[]) {
-	const seen = new Set<string>();
-	return items.filter((item) => {
-		if (seen.has(item.url)) return false;
-		seen.add(item.url);
-		return true;
+function upsertMedia(media: Map<string, RelayMediaItem>, item: RelayMediaItem) {
+	const existing = media.get(item.url);
+	if (!existing) {
+		media.set(item.url, item);
+		return;
+	}
+
+	media.set(item.url, {
+		...existing,
+		description: existing.description ?? item.description,
+		spoiler: existing.spoiler ?? item.spoiler,
+		width: existing.width ?? item.width ?? null,
+		height: existing.height ?? item.height ?? null
 	});
+}
+
+function normalizeMediaDimensions(width?: number | null, height?: number | null) {
+	if (
+		typeof width !== 'number' ||
+		typeof height !== 'number' ||
+		!Number.isFinite(width) ||
+		!Number.isFinite(height) ||
+		width <= 0 ||
+		height <= 0
+	) {
+		return { width: null, height: null };
+	}
+
+	return { width: Math.round(width), height: Math.round(height) };
+}
+
+function dedupeAttachments(items: RelayAttachmentItem[]) {
+	const byUrl = new Map<string, RelayAttachmentItem>();
+	for (const item of items) {
+		const existing = byUrl.get(item.url);
+		if (!existing) {
+			byUrl.set(item.url, item);
+			continue;
+		}
+		byUrl.set(item.url, {
+			...existing,
+			name: existing.name ?? item.name,
+			isSpoiler: existing.isSpoiler ?? item.isSpoiler,
+			width: existing.width ?? item.width ?? null,
+			height: existing.height ?? item.height ?? null
+		});
+	}
+	return [...byUrl.values()];
 }
 
 export function isImageMediaUrl(url: string) {
