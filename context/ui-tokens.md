@@ -7,13 +7,13 @@ Design-token guidance for the `apps/web` staff app. The token source of truth is
 Primary token file:
 
 ```text
-g:/Programming/nw-apps/bot/apps/web/src/App.css
+/bot/apps/web/src/App.css
 ```
 
 shadcn config:
 
 ```text
-g:/Programming/nw-apps/bot/apps/web/components.json
+/bot/apps/web/components.json
 ```
 
 Current shadcn settings:

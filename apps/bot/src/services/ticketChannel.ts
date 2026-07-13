@@ -645,11 +645,9 @@ export abstract class TicketChannelService {
 		const settings = SettingsService.getAppSettings(db);
 		if (settings.staffTicketOpenProfile === false) return null;
 
-		const setup = SetupService.getStatus(undefined, db);
-		const linkedGuilds = setup.linkedGuilds;
 		const primaryGuild = await container.client.guilds.fetch(primaryGuildId).catch(() => null);
 		const primaryMember = primaryGuild ? await primaryGuild.members.fetch(user.id).catch(() => null) : null;
-		const mutualServers = await this.resolveLinkedMutualServers(user.id, linkedGuilds, primaryGuild);
+		const mutualServers = await this.resolveMutualServers(user.id, primaryGuild);
 		const userMention = `<@${user.id}>`;
 		const displayName = primaryMember?.displayName ?? user.globalName ?? user.username;
 		const roleMentions = primaryMember ? formatRoleMentions(primaryMember) : 'None';
@@ -677,7 +675,7 @@ export abstract class TicketChannelService {
 			`**Previous tickets:** ${previousTicketCount}`,
 			`**Main server nickname:** ${primaryMember?.nickname ?? 'None'}`,
 			`**Main server roles:** ${roleNames}`,
-			`**Mutual linked servers:** ${mutual}`
+			`**Mutual servers:** ${mutual}`
 		].join('\n\n');
 
 		return {
@@ -709,26 +707,21 @@ export abstract class TicketChannelService {
 		});
 	}
 
-	private static async resolveLinkedMutualServers(
-		userId: string,
-		linkedGuilds: ReturnType<typeof SetupService.getStatus>['linkedGuilds'],
-		primaryGuild: Guild | null
-	) {
+	private static async resolveMutualServers(userId: string, primaryGuild: Guild | null) {
 		const names: string[] = [];
 
-		for (const linkedGuild of linkedGuilds) {
-			const guild =
-				primaryGuild?.id === linkedGuild.guildId
-					? primaryGuild
-					: await container.client.guilds.fetch(linkedGuild.guildId).catch(() => null);
-			if (!guild) continue;
+		for (const guild of container.client.guilds.cache.values()) {
+			const resolvedGuild = primaryGuild?.id === guild.id ? primaryGuild : guild;
 
-			const member = await guild.members.fetch(userId).catch(() => null);
+			const member =
+				resolvedGuild.members.cache.get(userId) ??
+				(await resolvedGuild.members.fetch(userId).catch(() => null));
 			if (!member) continue;
 
-			names.push(guild.name);
+			names.push(resolvedGuild.name);
 		}
 
+		names.sort((a, b) => a.localeCompare(b));
 		return names;
 	}
 
