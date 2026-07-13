@@ -63,9 +63,10 @@ Onboarding must cover:
 - Primary Discord server selection/linking.
 - Additional Discord servers to watch.
 - Bot invite flow as needed for each selected server.
-- Ticket channel handling. Choose exactly one strategy for the configured scope:
+- Ticket channel handling. Choose exactly one strategy on the primary Discord server only:
   - Discord category with per-ticket channels.
   - Discord forum channel with per-ticket posts.
+  Affiliated servers do not configure ticket routing.
 - Staff role mapping per linked Discord server.
 - Modular staff permissions. Start with `READ` and `MANAGE`, and model permissions so future modules can add more flags without rewriting role storage.
 
@@ -75,9 +76,9 @@ Onboarding completion is configuration state, not a security shortcut. APIs used
 
 | Path | Owns |
 | --- | --- |
-| `g:/Programming/nw-modmail/apps/bot` | Discord client, Hono API, route loading, Better Auth server, services, Drizzle schema/migrations, SQLite data, Discord component templates |
-| `g:/Programming/nw-modmail/apps/web` | Browser routes, layout, navbar/footer, ticket UI, TanStack Query hooks, API client wrapper, Better Auth React client, shadcn UI primitives |
-| `g:/Programming/nw-modmail/packages/shared` | Shared display-title helpers, Zod schemas, message/timeline types, realtime event union |
+| `/apps/bot` | Discord client, Hono API, route loading, Better Auth server, services, Drizzle schema/migrations, SQLite data, Discord component templates |
+| `/apps/web` | Browser routes, layout, navbar/footer, ticket UI, TanStack Query hooks, API client wrapper, Better Auth React client, shadcn UI primitives |
+| `/packages/shared` | Shared display-title helpers, Zod schemas, message/timeline types, realtime event union |
 
 The UI does not own Discord side effects, database access, or auth server behavior. The bot/API does not own React route rendering or browser state.
 
@@ -180,7 +181,7 @@ export default class Tickets extends Route {
 | `POST /setup/claim` | Requires Better Auth session; atomically claims setup ownership |
 | `GET|POST /setup/guilds` | Requires setup owner; lists Discord admin guilds or persists selected primary/additional guilds |
 | `GET /setup/guilds/:guildId/resources` | Requires setup owner; returns roles and category/forum channels after bot invite |
-| `PATCH /setup/guilds/:guildId/channel-strategy` | Requires setup owner; persists category/forum routing choice |
+| `PATCH /setup/guilds/:guildId/channel-strategy` | Requires setup owner; persists category/forum routing on the primary guild only |
 | `PUT /setup/guilds/:guildId/roles` | Requires setup owner; replaces role permission matrix |
 | `POST /setup/complete` | Requires setup owner; validates and completes onboarding |
 | `GET /protected` | Requires product `READ`; stub |
@@ -332,7 +333,7 @@ TicketService.create()
   -> first member message relay component
 ```
 
-The profile includes the member mention, account creation date, primary guild join date, previous ticket count, primary guild nickname, primary guild roles, and linked mutual servers. Mutual servers are only linked/onboarded guilds for this modmail setup. The profile is never sent to the member DM.
+The profile includes the member mention, account creation date, primary guild join date, previous ticket count, primary guild nickname, primary guild roles, and mutual servers. Mutual servers are every Discord server the bot is in where the member is also present (not limited to onboarded/linked guilds). The profile is never sent to the member DM.
 
 When disabled, provisioning keeps the older one-message behavior: category channels send only the first relay message, and forum posts are created with the first relay as the initial post message.
 

@@ -35,7 +35,7 @@ export class StaffTicketOpenProfileComponent extends Component<StaffTicketOpenPr
 				},
 				{
 					type: ComponentType.TextDisplay,
-					content: '**Mutual linked servers:** {{mutualServers}}'
+					content: '**Mutual servers:** {{mutualServers}}'
 				}
 			]
 		}
