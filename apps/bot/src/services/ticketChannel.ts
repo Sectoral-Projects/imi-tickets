@@ -21,7 +21,7 @@ import {
 	type User
 } from 'discord.js';
 import { eq } from 'drizzle-orm';
-import { SettingsService, NotifyOnNewThreadPresence } from './settings';
+import { SettingsService } from './settings';
 import { ChannelStrategy, SetupService } from './setup';
 import { MessageRelayService } from './messageRelay';
 import { MessageService } from './message';
@@ -1003,9 +1003,8 @@ export abstract class TicketChannelService {
 	}
 
 	/**
-	 * Pings staff in the newly created ticket channel/post.
-	 * "All" presence → role mentions (no member fetch).
-	 * Specific statuses → individual mentions for matching online members.
+	 * Pings configured staff roles in the newly created ticket channel/post.
+	 * Presence-filtered user pings are temporarily disabled (no Presence Intent).
 	 */
 	private static async notifyStaffOnNewTicket(
 		guild: Guild,
@@ -1019,60 +1018,18 @@ export abstract class TicketChannelService {
 			const roleIds = (settings.notifyOnNewThreadRoleIds ?? []).filter(Boolean);
 			if (roleIds.length === 0) return;
 
-			const presenceFilter = settings.notifyOnNewThreadPresence ?? [NotifyOnNewThreadPresence.All];
-			const allowAll = presenceFilter.includes(NotifyOnNewThreadPresence.All);
-			const allowedStatuses = new Set<string>(
-				allowAll
-					? []
-					: presenceFilter.filter((status) => status !== NotifyOnNewThreadPresence.All)
-			);
-
 			const channel = await guild.channels.fetch(channelId).catch(() => null);
 			if (!channel?.isTextBased() || !channel.isSendable()) return;
 
-			// All statuses: ping the roles themselves — faster and avoids mentioning everyone by user.
-			if (allowAll) {
-				const chunks = chunkRoleMentions(roleIds, 40, 1800);
-				for (const chunk of chunks) {
-					await channel
-						.send({
-							content: chunk.map((id) => `<@&${id}>`).join(' '),
-							allowedMentions: { roles: chunk, parse: [] }
-						})
-						.catch((error) => {
-							container.logger.warn(`Failed to send new-ticket role notify in ${channelId}`, error);
-						});
-				}
-				return;
-			}
-
-			await guild.members.fetch().catch((error) => {
-				container.logger.warn('Failed to fetch guild members for new-ticket notify', error);
-			});
-
-			const userIds = new Set<string>();
-			for (const member of guild.members.cache.values()) {
-				if (member.user.bot) continue;
-				if (!roleIds.some((roleId) => member.roles.cache.has(roleId))) continue;
-
-				const status = member.presence?.status;
-				if (!status || status === 'offline' || status === 'invisible') continue;
-				if (!allowedStatuses.has(status)) continue;
-
-				userIds.add(member.id);
-			}
-
-			if (userIds.size === 0) return;
-
-			const chunks = chunkIds([...userIds], 40, 1800);
+			const chunks = chunkRoleMentions(roleIds, 40, 1800);
 			for (const chunk of chunks) {
 				await channel
 					.send({
-						content: chunk.map((id) => `<@${id}>`).join(' '),
-						allowedMentions: { users: chunk, parse: [] }
+						content: chunk.map((id) => `<@&${id}>`).join(' '),
+						allowedMentions: { roles: chunk, parse: [] }
 					})
 					.catch((error) => {
-						container.logger.warn(`Failed to send new-ticket notify in ${channelId}`, error);
+						container.logger.warn(`Failed to send new-ticket role notify in ${channelId}`, error);
 					});
 			}
 		} catch (error) {
@@ -1081,13 +1038,13 @@ export abstract class TicketChannelService {
 	}
 }
 
-function chunkIds(ids: string[], maxItems: number, maxChars: number, mentionOverhead = 3) {
+function chunkRoleMentions(ids: string[], maxItems: number, maxChars: number) {
 	const chunks: string[][] = [];
 	let current: string[] = [];
 	let currentLength = 0;
 
 	for (const id of ids) {
-		const mentionLength = id.length + mentionOverhead; // <@id> or <@&id>
+		const mentionLength = id.length + 4; // <@&id>
 		const nextLength = currentLength + mentionLength + (current.length > 0 ? 1 : 0);
 		if (current.length >= maxItems || (current.length > 0 && nextLength > maxChars)) {
 			chunks.push(current);
@@ -1100,10 +1057,6 @@ function chunkIds(ids: string[], maxItems: number, maxChars: number, mentionOver
 
 	if (current.length > 0) chunks.push(current);
 	return chunks;
-}
-
-function chunkRoleMentions(ids: string[], maxItems: number, maxChars: number) {
-	return chunkIds(ids, maxItems, maxChars, 4); // <@&id>
 }
 
 function formatRoleMentions(member: GuildMember) {

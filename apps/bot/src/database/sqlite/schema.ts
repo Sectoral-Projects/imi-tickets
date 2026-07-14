@@ -26,6 +26,7 @@ export const config = sqliteTable("config", {
 		autoTagClosedThreads?: boolean;
 		notifyOnNewThread?: boolean;
 		notifyOnNewThreadRoleIds?: string[];
+		/** @deprecated Presence filter temporarily unused (no Presence Intent). */
 		notifyOnNewThreadPresence?: Array<'online' | 'idle' | 'dnd' | 'all'>;
 		/** When true, staff typing in a ticket channel triggers sendTyping() in the member DM. */
 		relayStaffTypingToMember?: boolean;
