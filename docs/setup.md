@@ -65,7 +65,7 @@ The web dashboard will be available at `http://localhost:5173`.
 ## 5. Discord Bot Setup
 
 1. Enable the **Message Content Intent** in your bot's settings
-2. Enable **Server Members Intent** and **Presence Intent**
+2. Enable **Server Members Intent**
 3. Invite the bot with sufficient permissions (Manage Channels, Send Messages, Read Messages, etc.)
 4. The bot creates a category for modmail channels on first use
 

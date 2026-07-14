@@ -24,7 +24,7 @@ export function ReactionEmoji({
         src={url}
         alt={emoji.name}
         draggable={false}
-        className={cn("size-4 shrink-0 object-contain", className)}
+        className={cn("size-5 shrink-0 object-contain", className)}
         loading="lazy"
       />
     );

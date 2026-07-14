@@ -39,6 +39,13 @@ export type AppSettings = {
 	privateMessagePrefix?: string;
 	/** Reject member DMs that hit these terms. */
 	dmWordBlacklist?: WordFilterRule[];
+	/** Bot presence from Settings → Whitelabel (re-applied on ready). */
+	whitelabelPresence?: WhitelabelPresenceSettings;
+};
+
+export type WhitelabelPresenceSettings = {
+	statusText: string;
+	activityType: 'playing' | 'listening' | 'watching' | 'competing' | 'custom';
 };
 
 export const TicketOpenButtonMode = {
@@ -340,6 +347,10 @@ function applySettingsPatch(
 	if ('dmWordBlacklist' in patch && patch.dmWordBlacklist !== undefined) {
 		target.dmWordBlacklist = normalizeWordFilterRules(patch.dmWordBlacklist);
 	}
+
+	if ('whitelabelPresence' in patch && patch.whitelabelPresence !== undefined) {
+		target.whitelabelPresence = normalizeWhitelabelPresence(patch.whitelabelPresence);
+	}
 }
 
 function normalizeAppSettings(settings: AppSettings): AppSettings {
@@ -359,6 +370,9 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
 		'privateMessagePrefix'
 	);
 	normalized.dmWordBlacklist = normalizeWordFilterRules(normalized.dmWordBlacklist ?? []);
+	if (normalized.whitelabelPresence) {
+		normalized.whitelabelPresence = normalizeWhitelabelPresence(normalized.whitelabelPresence);
+	}
 	if ((normalized.commandPrefix ?? ';') === (normalized.privateMessagePrefix ?? '`')) {
 		normalized.privateMessagePrefix = normalized.commandPrefix === '`' ? ';' : '`';
 	}
@@ -414,4 +428,27 @@ function normalizeNotifyRoleIds(value: unknown): string[] {
 		ids.push(roleId);
 	}
 	return ids;
+}
+
+const WHITELABEL_ACTIVITY_TYPES = new Set([
+	'playing',
+	'listening',
+	'watching',
+	'competing',
+	'custom'
+]);
+
+function normalizeWhitelabelPresence(value: unknown): WhitelabelPresenceSettings {
+	const entry = value && typeof value === 'object' ? (value as Partial<WhitelabelPresenceSettings>) : {};
+	const activityType =
+		typeof entry.activityType === 'string' && WHITELABEL_ACTIVITY_TYPES.has(entry.activityType)
+			? entry.activityType
+			: 'watching';
+	const statusText = String(entry.statusText ?? 'for tickets')
+		.trim()
+		.slice(0, 128);
+	return {
+		statusText: statusText || 'for tickets',
+		activityType
+	};
 }

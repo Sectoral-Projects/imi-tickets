@@ -1,7 +1,7 @@
 import type { EnrichedMessage } from "../../schemas/messages";
 import type { TimelineItem } from "../../schemas/timeline";
 import { canGroupAdjacentMessages } from "@imi/tickets-shared";
-import { formatAuditLabel } from "./audit";
+import { formatAuditLabel, resolveScheduledCloseAt } from "./audit";
 
 export type TimelineMessageBlock = {
   kind: "messages";
@@ -11,8 +11,14 @@ export type TimelineMessageBlock = {
 export type TimelineAuditBlock = {
   kind: "audit";
   auditId: number;
+  action: string;
   label: string;
   createdAt: string;
+  /** ISO closesAt for live scheduled-close countdowns. */
+  closesAt?: string | null;
+  /** Member user id for hoverable mentions (e.g. participant.added). */
+  userId?: string | null;
+  dmUnreachable?: boolean;
 };
 
 export type TimelineBlock = TimelineMessageBlock | TimelineAuditBlock;
@@ -158,11 +164,30 @@ export function buildTimelineBlocks(
 
     if (item.kind === "audit") {
       flushGroup();
+      const payload = item.audit.payload ?? {};
+      const closesAtRaw = payload.closesAt;
+      const userId =
+        typeof payload.userId === "string" && payload.userId.trim()
+          ? payload.userId.trim()
+          : typeof item.audit.userId === "string" && item.audit.userId.trim()
+            ? item.audit.userId.trim()
+            : null;
       blocks.push({
         kind: "audit",
         auditId: item.audit.id,
+        action: item.audit.action,
         label: formatAuditLabel(item.audit),
         createdAt: item.audit.createdAt,
+        userId,
+        dmUnreachable: payload.dmUnreachable === true,
+        closesAt:
+          item.audit.action === "thread.close.scheduled" &&
+          (typeof closesAtRaw === "string" || typeof closesAtRaw === "number") &&
+          resolveScheduledCloseAt(closesAtRaw) != null
+            ? typeof closesAtRaw === "string"
+              ? closesAtRaw
+              : new Date(closesAtRaw).toISOString()
+            : null,
       });
       continue;
     }

@@ -5,6 +5,7 @@ import { blue, gray, green, magenta, magentaBright, white, yellow } from 'colore
 import { ActivityType } from 'discord.js';
 import { totalmem } from 'os';
 import { AutoCloseService } from '@/services/autoClose';
+import { WhitelabelService } from '@/services/whitelabel';
 
 const dev = process.env.NODE_ENV !== 'production';
 
@@ -15,7 +16,9 @@ export class ReadyEvent extends Listener {
 	public override run() {
 		this.printBanner();
 		this.printStoreDebugInformation();
-		this.updateStatus();
+		if (!WhitelabelService.applyStoredPresence()) {
+			this.updateStatus();
+		}
 		AutoCloseService.start();
 	}
 

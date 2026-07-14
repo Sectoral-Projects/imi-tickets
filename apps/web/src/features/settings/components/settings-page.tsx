@@ -38,6 +38,7 @@ import { normalizeTicketOpenButtonMode } from "@/features/templates/constants";
 import { SettingsPageSkeleton } from "./settings-page-skeleton";
 import { ChannelPanelSettingsSection } from "./channel-panel-settings";
 import { DataPrivacySettingsSection } from "./data-privacy-settings";
+import { WhitelabelSettingsSection } from "./whitelabel-settings";
 import {
   StaffRoleAliasesEditor,
   staffRoleAliasesEqual,
@@ -112,6 +113,7 @@ export function SettingsContent() {
   const [templateEdits, setTemplateEdits] = useState<Record<string, TemplateEditDraft>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState("general");
 
   useProductAccessRedirect(error);
 
@@ -486,7 +488,13 @@ export function SettingsContent() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs
+        value={settingsTab}
+        onValueChange={(value) => {
+          if (value) setSettingsTab(value);
+        }}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
         <div className="mx-auto w-full max-w-3xl shrink-0 space-y-4 px-4 pt-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
@@ -500,6 +508,9 @@ export function SettingsContent() {
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="templates">Templates</TabsTrigger>
+            {data?.canAdmin ? (
+              <TabsTrigger value="whitelabel">Whitelabel</TabsTrigger>
+            ) : null}
             {data?.canAdmin ? (
               <TabsTrigger value="data-privacy">Data &amp; privacy</TabsTrigger>
             ) : null}
@@ -895,6 +906,12 @@ export function SettingsContent() {
         </TabsContent>
 
         {data?.canAdmin ? (
+          <TabsContent value="whitelabel">
+            <WhitelabelSettingsSection disabled={adminOnly} />
+          </TabsContent>
+        ) : null}
+
+        {data?.canAdmin ? (
           <TabsContent value="data-privacy">
             <DataPrivacySettingsSection disabled={adminOnly} />
           </TabsContent>
@@ -903,7 +920,8 @@ export function SettingsContent() {
           </div>
         </ScrollArea>
 
-        {saveError || !readOnly ? (
+        {(saveError || !readOnly) &&
+        (settingsTab === "general" || settingsTab === "templates") ? (
           <div className="mx-auto w-full max-w-3xl shrink-0 space-y-3 border-t border-border px-4 py-4 sm:px-6">
             {saveError ? (
               <p className="text-sm text-destructive">{saveError}</p>

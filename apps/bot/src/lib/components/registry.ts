@@ -4,10 +4,14 @@ import { Blocked } from './blocked';
 import { Closed } from './closed';
 import { Created } from './created';
 import { failed } from './configsMissing';
+import { MemberDmsClosed } from './memberDmsClosed';
+import { MemberDmsOpen } from './memberDmsOpen';
+import { MemberJoinedGuild } from './memberJoinedGuild';
 import { MemberLeftGuild } from './memberLeftGuild';
 import { Message } from './message';
 import { NotFound } from './notFound';
 import { Pong } from './pong';
+import { ScheduledCloseNotice } from './scheduledCloseNotice';
 import { StaffTicketOpenProfile } from './staffTicketOpenProfile';
 import { TicketOpenPrompt } from './ticketOpenPrompt';
 import { ChannelTicketPanelAck } from './channelTicketPanelAck';
@@ -160,6 +164,23 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 		supportsButtonForward: true,
 		renderDefault: () => AutoCloseReminder.render({ minutes: 30 })
 	}),
+	defineSystemComponent(ScheduledCloseNotice, {
+		name: 'Scheduled close notice',
+		description: 'Sent when staff schedules a ticket close with ;close /close time. Edited in place when cancelled.',
+		category: 'tickets',
+		variables: ['whenRelative', 'whenAbsolute', 'reasonBlock'],
+		sampleVariables: {
+			whenRelative: '<t:1710000000:R>',
+			whenAbsolute: '<t:1710000000:f>',
+			reasonBlock: '**Reason:** Resolved'
+		},
+		supportsButtonForward: true,
+		renderDefault: () =>
+			ScheduledCloseNotice.renderNotice({
+				closesAt: new Date(1_710_000_000_000),
+				reason: 'Resolved'
+			})
+	}),
 	defineSystemComponent(Transcript, {
 		name: 'Transcript notification',
 		description: 'Posted to the transcript channel when a ticket opens.',
@@ -194,11 +215,40 @@ export const SYSTEM_COMPONENTS: SystemComponentDefinition[] = [
 	}),
 	defineSystemComponent(MemberLeftGuild, {
 		name: 'Member left guild',
-		description: 'Posted in a ticket when the member leaves a linked guild.',
+		description:
+			'Staff-only notice in open tickets when a member participant leaves any server the bot is in.',
 		category: 'tickets',
 		variables: ['userLine', 'guildName'],
 		sampleVariables: { userLine: 'User (123)', guildName: 'Example Server' },
 		renderDefault: () => MemberLeftGuild.render({ userLine: 'User (123)', guildName: 'Example Server' })
+	}),
+	defineSystemComponent(MemberJoinedGuild, {
+		name: 'Member joined guild',
+		description:
+			'Staff-only notice in open tickets when a member participant joins any server the bot is in.',
+		category: 'tickets',
+		variables: ['userLine', 'guildName'],
+		sampleVariables: { userLine: 'User (123)', guildName: 'Example Server' },
+		renderDefault: () =>
+			MemberJoinedGuild.render({ userLine: 'User (123)', guildName: 'Example Server' })
+	}),
+	defineSystemComponent(MemberDmsClosed, {
+		name: 'Member DMs unavailable',
+		description:
+			'Staff-only notice when a ticket participant cannot receive bot DMs (closed DMs or no mutual guilds).',
+		category: 'tickets',
+		variables: ['userMention'],
+		sampleVariables: { userMention: '<@123>' },
+		renderDefault: () => MemberDmsClosed.render({ userMention: '<@123>' })
+	}),
+	defineSystemComponent(MemberDmsOpen, {
+		name: 'Member DMs available',
+		description:
+			'Staff-only notice when a previously unreachable ticket participant starts accepting bot DMs again.',
+		category: 'tickets',
+		variables: ['userMention'],
+		sampleVariables: { userMention: '<@123>' },
+		renderDefault: () => MemberDmsOpen.render({ userMention: '<@123>' })
 	}),
 	defineSystemComponent(Blocked, {
 		name: 'Blocked user',

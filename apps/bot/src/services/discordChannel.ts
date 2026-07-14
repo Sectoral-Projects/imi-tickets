@@ -1,14 +1,24 @@
 import { container } from '@sapphire/framework';
-import { MessageFlags, time, type APIMessageTopLevelComponent } from 'discord.js';
+import {
+	MessageFlags,
+	time,
+	type APIMessageTopLevelComponent,
+	type MessageMentionOptions
+} from 'discord.js';
 
 export abstract class DiscordChannelService {
-	static async sendComponents(channelId: string, components: APIMessageTopLevelComponent[]) {
+	static async sendComponents(
+		channelId: string,
+		components: APIMessageTopLevelComponent[],
+		options: { allowedMentions?: MessageMentionOptions } = {}
+	) {
 		const channel = await container.client.channels.fetch(channelId).catch(() => null);
 		if (!channel?.isTextBased() || !channel.isSendable()) return null;
 
 		return channel.send({
 			components,
-			flags: MessageFlags.IsComponentsV2
+			flags: MessageFlags.IsComponentsV2,
+			...(options.allowedMentions ? { allowedMentions: options.allowedMentions } : {})
 		});
 	}
 

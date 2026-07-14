@@ -46,6 +46,15 @@ export const config = sqliteTable("config", {
 		ticketChannelNameTemplate?: string | null;
 		/** When true, the staff site shows the Discord channel/post name as the ticket title. */
 		useChannelNameForTranscript?: boolean;
+		commandPrefix?: string;
+		privateMessagePrefix?: string;
+		dmWordBlacklist?: Array<{ term: string; match: 'keyword' | 'exact' }>;
+		staffTicketOpenProfile?: boolean;
+		/** Bot presence from Settings → Whitelabel. */
+		whitelabelPresence?: {
+			statusText: string;
+			activityType: 'playing' | 'listening' | 'watching' | 'competing' | 'custom';
+		};
 	}>(),
 	createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 	updatedAt: integer("updated_at", { mode: "timestamp" })
@@ -175,6 +184,8 @@ export const messages = sqliteTable("messages", {
 	isForwarded: integer("is_forwarded", { mode: "boolean" }).notNull().default(false),
 	/** Staff channel note prefixed with ` — not relayed to the member. */
 	isPrivateStaff: integer("is_private_staff", { mode: "boolean" }).notNull().default(false),
+	/** When set, this message was produced by a staff template command (includes prefix, e.g. `;faq`). */
+	staffCommand: text("staff_command"),
 	/** Logical parent message when this message is a Discord reply (not a forward). */
 	replyToMessageId: integer("reply_to_message_id"),
 	revision: integer("revision").notNull().default(1),
@@ -242,6 +253,13 @@ export const threads = sqliteTable("threads", {
 	}),
 	/** Staff-scheduled close deadline (`;close 24h`). Cleared when any message is recorded. */
 	scheduledCloseAt: integer("scheduled_close_at", { mode: "timestamp" }),
+	/** Discord messages announcing a pending scheduled close (staff + member DMs). */
+	scheduledCloseNotices: text("scheduled_close_notices", { mode: "json" }).$type<{
+		closesAt: number;
+		reason?: string;
+		auditId?: number;
+		messages: Array<{ channelId: string; messageId: string }>;
+	} | null>(),
 	/** When true, inactivity auto-close/reminders skip this ticket. */
 	autoCloseDisabled: integer("auto_close_disabled", { mode: "boolean" }).notNull().default(false),
 	createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
@@ -257,6 +275,8 @@ export const threadParticipants = sqliteTable(
 		role: text("role").notNull(),
 		dmChannelId: text("dm_channel_id"),
 		memberAlias: integer("member_alias"),
+		/** True when Discord rejects DMs to this participant (closed DMs / no mutual guilds). */
+		dmUnreachable: integer("dm_unreachable", { mode: "boolean" }).notNull().default(false),
 		joinedAt: integer("joined_at", { mode: "timestamp" }).notNull(),
 		lastReadAt: integer("last_read_at", { mode: "timestamp" }),
 		deletedAt: integer("deleted_at", { mode: "timestamp" })
@@ -281,7 +301,7 @@ export const messageRelays = sqliteTable(
 	},
 	(table) => [
 		primaryKey({
-			columns: [table.messageId, table.targetChannelId]
+			columns: [table.messageId, table.targetChannelId, table.relayMessageId]
 		})
 	]
 );

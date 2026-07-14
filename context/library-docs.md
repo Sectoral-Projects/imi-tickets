@@ -25,7 +25,7 @@ Do not rely on stale guidance from older context packs. This project does not cu
 - Commands live in `src/commands`; listeners live in `src/listeners`.
 - Use the Sapphire CLI script when scaffolding pieces: `pnpm generate`.
 - Keep Discord event code thin. Complex ticket lifecycle behavior belongs in services.
-- The client currently enables DM/guild message, DM/guild reaction, guild, member, message content, and typing intents plus user/member/channel/message/reaction partials.
+- The client currently enables DM/guild message, DM/guild reaction, guild, member, message content, and typing intents plus user/member/channel/message/reaction partials. GuildPresences is intentionally off for now (presence-filtered new-ticket pings are disabled).
 
 ## discord.js
 
@@ -34,6 +34,7 @@ Do not rely on stale guidance from older context packs. This project does not cu
 - Message attachments, users, roles, channels, and guild members should be normalized before persistence.
 - Store durable conversation data in services/SQLite rather than relying on Discord fetches as the only source of history.
 - Components rendered by the bot should use Discord Components V2-compatible structures.
+- Tenor/Giphy GIF shares are extracted as media-only in `relayContent.ts` (CDN asset into Media Gallery). Do not relay their SEO title + page URL as text.
 
 ## Hono
 
@@ -125,21 +126,24 @@ Do not rely on stale guidance from older context packs. This project does not cu
 
 ## TanStack Virtual
 
-- Used by `apps/web/src/features/tickets/components/ticket.tsx` to virtualize the ticket timeline inside the shadcn/Base UI `ScrollArea` viewport.
-- Use `useVirtualizer` with `getScrollElement: () => viewportRef.current`, measured variable-height rows through `measureElement`, and stable `getItemKey` values based on timeline item identity.
-- React 19 projects should pass `useFlushSync: false` unless upstream guidance changes.
-- Use `anchorTo: "end"` (chat guide) for prepend/measurement stability. It keeps the visible keyed item stable when older items prepend and compensates above-viewport size deltas, so do NOT hand-roll `scrollTop += heightDiff` restoration. Set `followOnAppend` true only when the view should stick to the newest message (normal mode), false in highlighted-window mode. Pass `scrollEndThreshold` (~80px) so `isAtEnd`/`followOnAppend` tolerate sub-pixel/measurement slack.
-- Dynamic-height backward scrolling uses the TanStack #659 mitigation: a custom `measureElement` returns the existing `itemSizeCache` value while `scrollDirection === "backward"` and otherwise delegates to the library's default measurer. This prevents media/markdown ResizeObserver churn from moving every following absolute row during the gesture.
-- `estimateSize` is message-aware rather than constant: it accounts for group position, text wrapping, replies, reactions, forwarding, files, images, and video embeds using comfortable upper bounds per TanStack guidance. Keep overscan moderate (currently 10); oversized page-wide overscan plus coarse estimates created a large temporary spacer before measurements settled.
-- Timeline pagination completes the message group at each fetched edge before returning: the 30-row base page and each 15-row side of a focused seed can consume up to 30 adjacent extras. The shared contract in `packages/shared/src/timeline.ts` requires same author/channel, chronological timestamps within two minutes, and no reply/private note; audits stop completion. Infinite-query/window pages remain hard visual-group boundaries as a fallback for groups that exceed the cap, so a later prepend/append cannot reshape an existing boundary row and invalidate its cached height.
+- Used by `apps/web/src/features/tickets/components/ticket.tsx` to virtualize the ticket timeline. Use a **native** `overflow: auto` viewport (not Base UI `ScrollArea`) so `anchorTo: "end"` prepend compensation writes the same element TanStack measures — `ScrollArea` wrappers have fought end-anchored history loads.
+- **Virtual unit = message group** (or audit). Keys are `group-${firstMessageId}` / `audit-${id}` via `timelineBlockKey`. Do not flatten to per-message virtual rows.
+- **Immutable page blocks:** each complete API page is converted with `buildTimelineBlocks` **before** pages are concatenated (`hooks/timeline.ts` / `use-timeline-window.ts`). Older loads prepend those finalized blocks. Never rebuild groups across the whole flat timeline after a prepend — that breaks TanStack’s stable-key contract. Server `takeCompleteGroups` makes page boundaries authoritative group boundaries; do not reintroduce client `groupBreakBeforeKeys`.
+- Use `useVirtualizer` with `getScrollElement: () => viewportRef.current`, stock `measureElement` on the group root (via `ref={virtualizer.measureElement}`), and stable `getItemKey`. Follow the [chat guide](https://tanstack.com/virtual/latest/docs/chat): `anchorTo: "end"`, stable keys, prepend data normally — **do not** hand-roll `scrollTop` / `scrollToOffset` / batch-settle after prepend (that fights `anchorTo` and shoves the viewport). Never fall back to index keys.
+- Prefer the chat **guide** DOM pattern for this timeline: React-owned inner `height: virtualizer.getTotalSize()` and item `transform: translateY(start)`. Do **not** enable `directDomUpdates` here — its container size write runs in a layout effect *after* `_willUpdate` syncs `scrollTop`, so a large older-page prepend clamps `scrollTop` to the previous max and jumps the viewport into newly loaded older messages. Keep `useFlushSync: false` for React 19.
+- Use `anchorTo: "end"` (chat guide) for prepend/measurement stability. Set `followOnAppend` true only in normal mode, false in highlighted-window mode. Pass `scrollEndThreshold` (~80px).
+- **Upstream workaround:** [TanStack Virtual #1227](https://github.com/TanStack/virtual/issues/1227) affects `@tanstack/react-virtual` 3.14.6 / `@tanstack/virtual-core` 3.17.4: backward-scroll remeasure compensation is skipped and the documented option wiring is broken. The timeline directly assigns the instance callback to compensate only rows above the logical viewport; remove this workaround once upstream is fixed.
+- **Anchoring is keyed identity, not estimate accuracy.** With a stable suffix, estimated prefix height is applied equally to the anchor start and `scrollTop`. Use content-aware `estimateTimelineBlockSize` (card border + outer `pb-4`) only as an initial layout hint; stock `measureElement` is authoritative. Do **not** size-lock, freeze tall estimates, stretch slots, settle-flush, offscreen-premeasure, or custom-restore scroll.
+- Overscan ~6 **groups**. Render via `MessageGroupCard` (single card shell) + inner `MessageTimelineRow` with `renderShell={false}`.
+- Timeline **paging is group-based**: shared `TIMELINE_GROUP_LIMIT` (15), `TIMELINE_WINDOW_GROUP_LIMIT` (8), `MAX_TIMELINE_ROWS_PER_PAGE` (90), `takeCompleteGroups` / `timelineGroupFetchRowLimit`. Full transcript cursors remain row offsets advanced by returned row count; window cursors stay `createdAt:entityId` at group boundaries. Grouping rules: same author/channel, ≤2 minutes, no reply/private; audits are singleton groups; max 30 messages per chain.
 - NEVER hand-roll `scrollTop` for a virtualized list. All positioning goes through the virtualizer's own methods (`scrollToEnd`, `scrollToIndex`). Manual `scrollTop = scrollHeight` fights the virtualizer because `scrollHeight` is only the *estimated* `getTotalSize()`; once rows measure real heights the true bottom moves and you end up scrolled up.
-- REQUIRED CSS: put `overflow-anchor: none` (and `overscroll-behavior: contain`) on the scroll viewport (via `ScrollArea`'s `viewportClassName`). Without it the browser's native scroll anchoring fights the virtualizer's `anchorTo` adjustments and causes drift during measurement/prepend and inconsistent centering.
-- Normal-mode initial bottom: call `virtualizer.scrollToEnd()` in a `useLayoutEffect` and keep re-asserting each frame until `scrollHeight - scrollTop - clientHeight <= 1` holds for a few consecutive frames (generous frame budget), then latch a `didInitialScroll` ref. A fixed re-assert count is NOT enough: with `useFlushSync: false` the virtualizer's internal reconcile can declare the scroll stable against the *estimated* total size one frame before the async re-render lands with measured row heights, leaving the view slightly above the true bottom. `anchorTo: "end"` + `followOnAppend` keep it pinned afterward.
-- `scrollToIndex`/`scrollToEnd`/`scrollBy` have a BUILT-IN per-frame reconcile loop (`scrollState` + `reconcileScroll`, ~5s budget) that re-computes the target as rows measure â€” including keeping `behavior: "smooth"` re-targeted. Do not re-issue `scrollToIndex` every frame while a smooth scroll is in flight; that resets the internal state. Also know that targets are CLAMPED to the current (possibly estimated) max scroll offset, so a one-shot call toward far unmeasured content can park short â€” watch the DOM and correct after motion ends.
-- Keep ONE contiguous, growing item list with stable keys. `anchorTo: "end"` only stays anchored when keys persist across data changes; wholesale-replacing the list (e.g. a windowed "jump") makes it lose its anchor and fall back to end-anchoring (snaps to the bottom). Grow the list by prepend/append instead.
-- Drive infinite loading off the scroll element's real metrics via the viewport `onScroll` handler (`scrollTop` / `scrollHeight` / `clientHeight` with a generous px preload threshold), NOT the virtualizer's virtual index range. The Base UI `ScrollArea.Viewport` is a plain `overflow:scroll` div and its native `onScroll` fires reliably; the virtual index range only trips at the exact edge and re-runs unreliably. Also re-check edges once after each data change (window seed/replace/page) for content already sitting at an edge. Gate on React state flags, never a ref.
+- REQUIRED CSS: put `overflow-anchor: none` (and `overscroll-behavior: contain`) on the scroll viewport. Without it the browser's native scroll anchoring fights the virtualizer's `anchorTo` adjustments and causes drift during measurement/prepend and inconsistent centering.
+- Normal-mode initial bottom: call `virtualizer.scrollToEnd()` in a `useLayoutEffect` and keep re-asserting each frame until `scrollHeight - scrollTop - clientHeight <= 1` holds for a few consecutive frames (generous frame budget), then latch a `didInitialScroll` ref. A fixed re-assert count is NOT enough: the virtualizer can declare scroll stable against estimated total size one frame before measured heights land. `anchorTo: "end"` + `followOnAppend` keep it pinned afterward.
+- `scrollToIndex`/`scrollToEnd`/`scrollBy` have a BUILT-IN per-frame reconcile loop (`scrollState` + `reconcileScroll`, ~5s budget) that re-computes the target as rows measure — including keeping `behavior: "smooth"` re-targeted. Do not re-issue `scrollToIndex` every frame while a smooth scroll is in flight; that resets the internal state. Also know that targets are CLAMPED to the current (possibly estimated) max scroll offset, so a one-shot call toward far unmeasured content can park short — watch the DOM and correct after motion ends.
+- Keep ONE contiguous, growing item list with stable keys. `anchorTo: "end"` only stays anchored when keys persist across data changes; wholesale-replacing the list (e.g. a windowed "jump") makes it lose its anchor and fall back to end-anchoring (snaps to the bottom). Grow the list by prepend/append instead. In development, `assertStableBlockPrepend` fails loudly if a prepend mutates the previous suffix.
+- Drive infinite loading off the scroll element's real metrics via the viewport `onScroll` handler (`scrollTop` / `scrollHeight` / `clientHeight` with a generous px preload threshold), NOT the virtualizer's virtual index range. Also re-check edges once after each data change (window seed/replace/page) for content already sitting at an edge. Gate on React state flags, never a ref.
 - For an unavoidable full-list replacement (a "seek" to a far target), reset `viewport.scrollTop = 0` before committing the new items so `anchorTo: "end"` does not treat it as "was at the end". Cover the swap with a brief overlay rather than a fake scroll-through animation.
-- Center on a specific message row in two phases, all through virtualizer APIs: (1) mount the row's block with `scrollToIndex(index, { align: "center" })` (re-issue per frame in auto mode while the element is not yet in the DOM; issue ONCE in smooth mode and let the internal reconcile chase it); (2) once the `[data-message-id]` element exists, correct the remaining offset between the exact row's center and the viewport center with `virtualizer.scrollBy(delta)` until stable for consecutive frames. `scrollToIndex(align:center)` centers the whole virtual row (message group card), NOT the individual message inside it â€” comparing stability against the inner row while only ever issuing `scrollToIndex` can never converge. In smooth mode only apply `scrollBy` corrections after motion has ended (delta stopped changing between frames).
+- Center on a specific message in two phases: (1) `scrollToIndex` on the **group** that contains the message; (2) once `[data-message-id]` exists, `scrollBy` to center that inner element. `scrollToIndex(align:center)` centers the group card, not the individual message.
 
 ## Zod
 
@@ -165,6 +169,12 @@ pnpm dlx shadcn@latest add <component>
 
 Use semantic token classes from `ui-tokens.md`. Do not hardcode hex values or raw Tailwind palette classes in new UI.
 
+## react-easy-crop
+
+- Used only for Settings → Whitelabel avatar cropping (`avatar-crop-dialog.tsx`).
+- Prefer `cropShape="round"`, `aspect={1}`, and export a 512×512 PNG data URI for Discord `editMe` avatar uploads.
+- Keep the crop UI in a Dialog; do not crop inline in the form.
+
 ## next-themes
 
 - Theme provider lives in `apps/web/src/components/theme/provider.tsx`.
@@ -175,6 +185,12 @@ Use semantic token classes from `ui-tokens.md`. Do not hardcode hex values or ra
 
 - Use `lucide-react` for icons in the staff UI.
 - Keep icon sizes consistent with surrounding shadcn primitives, commonly `size-4` or `size-5`.
+
+## Polar Checkout (`@polar-sh/checkout`)
+
+- Footer support link uses `PolarEmbedCheckout` from `@polar-sh/checkout/embed` (React SPA path — do not rely on the CDN `data-auto-init` script alone; it races React mount).
+- Mark the trigger with `data-polar-checkout` and call `PolarEmbedCheckout.init()` after mount / when the theme attribute changes.
+- Prefer matching `data-polar-checkout-theme` to `next-themes` `resolvedTheme` instead of hardcoding dark.
 
 ## Twemoji (`@discordapp/twemoji`)
 

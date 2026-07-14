@@ -1,9 +1,12 @@
 import { componentsToTranscriptText } from '@/lib/components/util/transcriptText';
+import { logDmSendFailure } from '@/lib/discord/dmErrors';
 import { DiscordChannelService } from './discordChannel';
 import { MemberSnapshotService } from './snapshot';
 import { MessageRelayService } from './messageRelay';
 import { MessageService } from './message';
 import { MessageTemplateService, type MessageTemplateView } from './messageTemplate';
+import { ParticipantDmStatusService } from './participantDmStatus';
+import { SettingsService } from './settings';
 import { TicketChannelService } from './ticketChannel';
 import { TicketService } from './ticket';
 import { container } from '@sapphire/framework';
@@ -49,9 +52,21 @@ export abstract class StaffTemplateCommandService {
 						components,
 						flags: MessageFlags.IsComponentsV2
 					})
-					.catch(() => null);
+					.catch(async (error) => {
+						logDmSendFailure(
+							`Failed to relay template command DM for ticket ${thread.id} to ${participant.userId}`,
+							error
+						);
+						await ParticipantDmStatusService.noteUnreachable(thread.id, participant.userId, {
+							error,
+							db
+						});
+						return null;
+					});
 
 				if (!dmMessage) continue;
+
+				await ParticipantDmStatusService.noteReachable(thread.id, participant.userId, { db });
 
 				relayDeliveries.push({
 					targetChannelId: dmChannel.id,
@@ -61,6 +76,12 @@ export abstract class StaffTemplateCommandService {
 			}
 
 			const snapshot = MemberSnapshotService.capture(message.member ?? message.author);
+			const commandName = (template.staffCommand ?? '').trim();
+			const staffCommand =
+				commandName.length > 0
+					? `${SettingsService.getCommandPrefix(db)}${commandName}`
+					: null;
+
 			const created = MessageService.create({
 				threadId: thread.id,
 				channelId: message.channel.id,
@@ -68,6 +89,7 @@ export abstract class StaffTemplateCommandService {
 				messageId: staffMessage.id,
 				memberSnapshotId: snapshot.id,
 				content: componentsToTranscriptText(components) || template.name,
+				staffCommand,
 				executedBy: message.author.id
 			});
 

@@ -13,10 +13,12 @@ import {
 	DEFAULT_BUTTON_MESSAGE_DELIVERY,
 	type ButtonMessageDelivery as ButtonMessageDeliveryType
 } from '@/lib/buttonActions/types';
+import { logDmSendFailure } from '@/lib/discord/dmErrors';
 import { DiscordChannelService } from './discordChannel';
 import { MemberSnapshotService } from './snapshot';
 import { MessageService } from './message';
 import { MessageTemplateService } from './messageTemplate';
+import { ParticipantDmStatusService } from './participantDmStatus';
 import { TicketChannelService } from './ticketChannel';
 import { TicketService } from './ticket';
 import type { ButtonInteraction, ModalSubmitInteraction, User } from 'discord.js';
@@ -207,8 +209,19 @@ export abstract class TemplateButtonService {
 					components,
 					flags: MessageFlags.IsComponentsV2
 				})
-				.catch(() => null);
+				.catch(async (error) => {
+					logDmSendFailure(
+						`Failed to forward button message DM for ticket ${options.threadId} to ${participant.userId}`,
+						error
+					);
+					await ParticipantDmStatusService.noteUnreachable(options.threadId, participant.userId, {
+						error
+					});
+					return null;
+				});
 			if (!sentMessage) continue;
+
+			await ParticipantDmStatusService.noteReachable(options.threadId, participant.userId);
 
 			MessageService.create({
 				threadId: options.threadId,

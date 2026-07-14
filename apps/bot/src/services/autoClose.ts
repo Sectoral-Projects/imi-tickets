@@ -1,8 +1,10 @@
 import { threads } from '@/database/sqlite/schema';
 import { AutoCloseReminder } from '@/lib/components/autoCloseReminder';
+import { logDmSendFailure } from '@/lib/discord/dmErrors';
 import { container } from '@sapphire/framework';
 import { MessageFlags } from 'discord.js';
 import { and, eq, gt, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { ParticipantDmStatusService } from './participantDmStatus';
 import { SettingsService } from './settings';
 import { TicketChannelService } from './ticketChannel';
 import { TicketCloseService } from './ticketClose';
@@ -48,8 +50,9 @@ export abstract class AutoCloseService {
 		const now = Date.now();
 		let nextAt: number | null = null;
 
+		// Timestamps are unix seconds integers — do not use strftime('%s', col) (returns null).
 		const scheduledRow = db.get<{ at: number | null }>(sql`
-			SELECT MIN(CAST(strftime('%s', ${threads.scheduledCloseAt}) AS INTEGER) * 1000) AS at
+			SELECT MIN(${threads.scheduledCloseAt} * 1000) AS at
 			FROM ${threads}
 			WHERE ${threads.status} = ${ThreadStatus.Open}
 				AND ${threads.deletedAt} IS NULL
@@ -61,7 +64,7 @@ export abstract class AutoCloseService {
 			const closeAfterMs = closeAfterMinutes * 60_000;
 
 			const closeRow = db.get<{ at: number | null }>(sql`
-				SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${closeAfterMs}) AS at
+				SELECT MIN(${threads.lastMessageAt} * 1000 + ${closeAfterMs}) AS at
 				FROM ${threads}
 				WHERE ${threads.status} = ${ThreadStatus.Open}
 					AND ${threads.deletedAt} IS NULL
@@ -77,7 +80,7 @@ export abstract class AutoCloseService {
 			if (reminderMinutes && reminderMinutes > 0 && reminderMinutes < closeAfterMinutes) {
 				const remindLeadMs = closeAfterMs - reminderMinutes * 60_000;
 				const remindRow = db.get<{ at: number | null }>(sql`
-					SELECT MIN(CAST(strftime('%s', ${threads.lastMessageAt}) AS INTEGER) * 1000 + ${remindLeadMs}) AS at
+					SELECT MIN(${threads.lastMessageAt} * 1000 + ${remindLeadMs}) AS at
 					FROM ${threads}
 					WHERE ${threads.status} = ${ThreadStatus.Open}
 						AND ${threads.deletedAt} IS NULL
@@ -96,6 +99,7 @@ export abstract class AutoCloseService {
 		}
 
 		if (!nextAt) {
+			// Keep a slow poll when inactivity auto-close is enabled; otherwise idle.
 			return closeAfterMinutes && closeAfterMinutes > 0 ? MAX_POLL_MS : null;
 		}
 
@@ -222,10 +226,25 @@ export abstract class AutoCloseService {
 			const dmChannel = await TicketChannelService.resolveParticipantDmChannel(participant, thread.id, db);
 			if (!dmChannel?.isDMBased()) continue;
 
-			await dmChannel.send({
-				components,
-				flags: MessageFlags.IsComponentsV2
-			});
+			const sent = await dmChannel
+				.send({
+					components,
+					flags: MessageFlags.IsComponentsV2
+				})
+				.catch(async (error) => {
+					logDmSendFailure(
+						`Failed to send auto-close reminder DM for ticket ${thread.id} to ${participant.userId}`,
+						error
+					);
+					await ParticipantDmStatusService.noteUnreachable(thread.id, participant.userId, {
+						error,
+						db
+					});
+					return null;
+				});
+			if (sent) {
+				await ParticipantDmStatusService.noteReachable(thread.id, participant.userId, { db });
+			}
 		}
 
 		TicketService.markAutoCloseReminderSent(thread.id, thread.lastMessageAt, db);

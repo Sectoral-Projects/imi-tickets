@@ -158,7 +158,8 @@ export class ContactCommand extends Command {
 						continue;
 					}
 					await TicketOpenService.sendStaffContactDm(thread.id, dm.id, executedBy, {
-						recordTranscript: index === 0
+						recordTranscript: index === 0,
+						userId: user.id
 					});
 				}
 

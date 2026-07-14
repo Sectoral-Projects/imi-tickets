@@ -68,6 +68,7 @@ PUT /setup/guilds/:guildId/roles
 POST /setup/complete
 GET /protected
 GET /settings
+GET|PATCH /settings/whitelabel
 GET|POST /api/auth/*
 ```
 

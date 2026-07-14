@@ -11,7 +11,6 @@ import { useTimeline } from "../hooks/timeline";
 import { useParams, useSearchParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Marker, MarkerContent } from "@/components/ui/marker";
 import {
   formatHighlightedMessageIds,
   parseHighlightedMessageIds,
@@ -25,6 +24,7 @@ import { resolveTicketDisplayTitle } from "../utils/display-title";
 import { TicketDetailSkeleton } from "./ticket-detail-skeleton";
 import { TicketHeaderParticipants } from "./ticket-header-participants";
 import { MessageGroupCard } from "./message-group-card";
+import { TimelineAuditMarker } from "./timeline-audit-marker";
 import { useTimelineWindow } from "./hooks/use-timeline-window";
 import {
   useTimelineVirtualizer,
@@ -477,9 +477,7 @@ export function TicketContent() {
                   }}
                 >
                   {item.kind === "audit" && (
-                    <Marker variant="separator">
-                      <MarkerContent>{item.label}</MarkerContent>
-                    </Marker>
+                    <TimelineAuditMarker block={item} />
                   )}
 
                   {item.kind === "messages" && (
