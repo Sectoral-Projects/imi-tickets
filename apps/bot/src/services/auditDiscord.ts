@@ -77,6 +77,29 @@ function formatAuditEntry(entry: AuditEntry) {
 					.filter(Boolean)
 					.join('\n')
 			};
+		case AuditAction.ThreadCloseScheduled: {
+			const duration =
+				typeof payload.durationLabel === 'string' && payload.durationLabel.trim()
+					? payload.durationLabel.trim()
+					: 'soon';
+			return {
+				action: 'Close scheduled',
+				summary: [
+					entry.threadId ? `Ticket #${entry.threadId}` : null,
+					`Closes in ${duration}`,
+					typeof payload.reason === 'string' && payload.reason.trim()
+						? `Reason: ${payload.reason.trim()}`
+						: null
+				]
+					.filter(Boolean)
+					.join('\n')
+			};
+		}
+		case AuditAction.ThreadCloseScheduleCancelled:
+			return {
+				action: 'Close schedule cancelled',
+				summary: entry.threadId ? `Ticket #${entry.threadId}` : 'Scheduled close cancelled'
+			};
 		case AuditAction.MessageCreated:
 			return {
 				action: 'Message recorded',
@@ -114,6 +137,38 @@ function formatAuditEntry(entry: AuditEntry) {
 					typeof payload.action === 'string'
 						? String(payload.action)
 						: 'Settings or setup changed'
+			};
+		case AuditAction.ParticipantAdded: {
+			const unavailable = payload.dmUnreachable === true;
+			return {
+				action: unavailable ? 'Member added (DMs unavailable)' : 'Member added',
+				summary: [
+					entry.threadId ? `Ticket #${entry.threadId}` : null,
+					entry.userId ? `User: ${entry.userId}` : null
+				]
+					.filter(Boolean)
+					.join('\n')
+			};
+		}
+		case AuditAction.ParticipantDmsUnavailable:
+			return {
+				action: 'DMs unavailable',
+				summary: [
+					entry.threadId ? `Ticket #${entry.threadId}` : null,
+					entry.userId ? `User: ${entry.userId}` : null
+				]
+					.filter(Boolean)
+					.join('\n')
+			};
+		case AuditAction.ParticipantDmsAvailable:
+			return {
+				action: 'DMs available',
+				summary: [
+					entry.threadId ? `Ticket #${entry.threadId}` : null,
+					entry.userId ? `User: ${entry.userId}` : null
+				]
+					.filter(Boolean)
+					.join('\n')
 			};
 		default:
 			return {

@@ -1,7 +1,9 @@
 import { StaffContact } from '@/lib/components/staffContact';
+import { isUnreachableDmError, logDmSendFailure } from '@/lib/discord/dmErrors';
 import { OutboundDmGuard } from '@/lib/discord/outboundDmGuard';
 import { BlockService } from '@/services/block';
 import { AuditAction, AuditService } from '@/services/audit';
+import { ParticipantDmStatusService } from '@/services/participantDmStatus';
 import { RealtimeService } from '@/services/realtime';
 import { TicketChannelService } from '@/services/ticketChannel';
 import { ParticipantRole, TicketService, ThreadStatus } from '@/services/ticket';
@@ -33,19 +35,39 @@ export abstract class TicketParticipantService {
 			throw new Error('That member is blocked from tickets.');
 		}
 
-		const dmChannel = await user.createDM().catch(() => null);
+		const dmChannel = await user.createDM().catch((error) => {
+			if (isUnreachableDmError(error)) return null;
+			throw error;
+		});
 		if (!dmChannel) {
 			throw new Error(`Could not open a DM with ${user.tag}.`);
 		}
 
 		TicketService.addParticipant(threadId, user.id, ParticipantRole.User, { dmChannelId: dmChannel.id }, db);
 
+		let dmUnreachable = false;
+		OutboundDmGuard.mark(dmChannel.id);
+		try {
+			await dmChannel.send({
+				components: await StaffContact.render(),
+				flags: [MessageFlags.IsComponentsV2]
+			});
+		} catch (error) {
+			logDmSendFailure(`Failed to notify ${user.tag} about ticket add`, error);
+			if (isUnreachableDmError(error)) {
+				dmUnreachable = true;
+			}
+		} finally {
+			OutboundDmGuard.unmark(dmChannel.id);
+		}
+
+		// Audit marker first so it sorts above the staff open-profile transcript row.
 		AuditService.log({
 			action: AuditAction.ParticipantAdded,
 			executedBy,
 			threadId,
 			userId: user.id,
-			payload: { userId: user.id }
+			payload: { userId: user.id, dmUnreachable }
 		});
 
 		await TicketChannelService.postStaffOpenProfile(
@@ -55,16 +77,12 @@ export abstract class TicketParticipantService {
 			db
 		);
 
-		OutboundDmGuard.mark(dmChannel.id);
-		try {
-			await dmChannel.send({
-				components: await StaffContact.render(),
-				flags: [MessageFlags.IsComponentsV2]
+		if (dmUnreachable) {
+			await ParticipantDmStatusService.noteUnreachable(threadId, user.id, {
+				user,
+				skipTranscript: true,
+				db
 			});
-		} catch (error) {
-			container.logger.warn(`Failed to notify ${user.tag} about ticket add`, error);
-		} finally {
-			OutboundDmGuard.unmark(dmChannel.id);
 		}
 
 		RealtimeService.publish({ type: 'ticket.updated', ticketId: threadId });

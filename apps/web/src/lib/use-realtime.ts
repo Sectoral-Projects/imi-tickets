@@ -77,6 +77,9 @@ export function useRealtime(
             void queryClient.invalidateQueries({
               queryKey: ["ticket", String(ticketId)],
             });
+            void queryClient.invalidateQueries({
+              queryKey: ["timeline", ticketId],
+            });
           }
 
           if (data.type === "message.created" || data.type === "message.updated") {

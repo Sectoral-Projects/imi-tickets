@@ -19,7 +19,12 @@ const LIFECYCLE_AUDIT_ACTIONS = [
 	AuditAction.ThreadClosed,
 	AuditAction.ThreadReopened,
 	AuditAction.ThreadTagAdded,
-	AuditAction.ThreadTagRemoved
+	AuditAction.ThreadTagRemoved,
+	AuditAction.ThreadCloseScheduled,
+	AuditAction.ThreadCloseScheduleCancelled,
+	AuditAction.ParticipantAdded,
+	AuditAction.ParticipantDmsUnavailable,
+	AuditAction.ParticipantDmsAvailable
 ] as const;
 
 export type AuditTimelineEntry = typeof auditLog.$inferSelect;

@@ -7,7 +7,9 @@ import { AutoCloseService } from './autoClose';
 import { MessageRelayService } from './messageRelay';
 import { MessageReactionService, type MessageReactionSummary } from './messageReaction';
 import { RealtimeService } from './realtime';
+import { TicketCloseService } from './ticketClose';
 import { TicketService } from './ticket';
+import { TRANSCRIPT_SYSTEM_AUTHOR_ID } from '@/lib/transcript/systemMessage';
 import type { DbClient } from './types';
 
 export interface CreateMessageInput {
@@ -20,6 +22,8 @@ export interface CreateMessageInput {
 	content: string;
 	isForwarded?: boolean;
 	isPrivateStaff?: boolean;
+	/** Staff template command invocation including prefix (e.g. `;faq`). */
+	staffCommand?: string | null;
 	replyToMessageId?: number;
 	/** Defaults to `authorId` — override for system/staff-initiated writes. */
 	executedBy?: string;
@@ -77,6 +81,8 @@ export abstract class MessageService {
 		const existing = container.sqlite.select().from(messages).where(eq(messages.messageId, data.messageId)).get();
 		if (existing) return existing;
 
+		let cancelledNotices: ReturnType<typeof TicketService.clearScheduledClose> = null;
+
 		const message = container.sqlite.transaction((tx) => {
 			const created = tx
 				.insert(messages)
@@ -90,6 +96,7 @@ export abstract class MessageService {
 					content: data.content,
 					isForwarded: data.isForwarded ?? false,
 					isPrivateStaff: data.isPrivateStaff ?? false,
+					staffCommand: data.staffCommand?.trim() || null,
 					replyToMessageId: data.replyToMessageId,
 					createdAt: new Date()
 				})
@@ -97,7 +104,10 @@ export abstract class MessageService {
 				.get();
 
 			TicketService.touchLastMessageAt(data.threadId, tx);
-			TicketService.clearScheduledClose(data.threadId, tx);
+			// System transcript notices must not cancel a staff-scheduled close.
+			if (data.authorId !== TRANSCRIPT_SYSTEM_AUTHOR_ID) {
+				cancelledNotices = TicketService.clearScheduledClose(data.threadId, tx);
+			}
 
 			AuditService.log(
 				{
@@ -115,6 +125,14 @@ export abstract class MessageService {
 		});
 
 		AutoCloseService.wake();
+
+		if (cancelledNotices) {
+			void TicketCloseService.finalizeScheduleCancellation(
+				data.threadId,
+				cancelledNotices,
+				data.executedBy ?? data.authorId
+			);
+		}
 
 		RealtimeService.publish({
 			type: 'message.created',

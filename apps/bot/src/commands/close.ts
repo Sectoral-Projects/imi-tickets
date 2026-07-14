@@ -1,8 +1,8 @@
 import { Closed } from '@/lib/components/closed';
 import { NotFound } from '@/lib/components/notFound';
+import { ScheduledCloseNotice } from '@/lib/components/scheduledCloseNotice';
 import { parseDurationOrDate, splitLeadingTimeAndReason } from '@/lib/discord/parseDurationOrDate';
 import { requireGuildPermission, respondComponents, textComponent } from '@/lib/discord/staffCommand';
-import { AutoCloseService } from '@/services/autoClose';
 import { TicketCloseService } from '@/services/ticketClose';
 import { TicketService } from '@/services/ticket';
 import { ApplyOptions } from '@sapphire/decorators';
@@ -149,12 +149,24 @@ export class UserCloseCommand extends Command {
 		}
 
 		if (scheduledAt) {
-			TicketService.setScheduledClose(thread.id, scheduledAt);
-			AutoCloseService.wake();
+			const notice = await ScheduledCloseNotice.renderNotice({
+				closesAt: scheduledAt,
+				reason
+			});
 			const unix = Math.floor(scheduledAt.getTime() / 1000);
-			const reasonPart = reason ? ` Reason: ${reason}` : '';
-			const line = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${reasonPart}`;
-			await respondComponents(message, textComponent('Close', [line]), { fallback: line });
+			const fallback = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${
+				reason ? ` Reason: ${reason}` : ''
+			}`;
+			const staffNotice = await respondComponents(message, notice, { fallback });
+			if (!message.channel.isTextBased()) return;
+			await TicketCloseService.scheduleClose({
+				threadId: thread.id,
+				closesAt: scheduledAt,
+				reason,
+				executedBy: message.author.id,
+				staffChannel: message.channel,
+				staffNoticeMessage: staffNotice
+			});
 			return;
 		}
 
@@ -202,12 +214,31 @@ export class UserCloseCommand extends Command {
 		}
 
 		if (scheduledAt) {
-			TicketService.setScheduledClose(thread.id, scheduledAt);
-			AutoCloseService.wake();
+			if (!interaction.channel.isTextBased()) {
+				await respondComponents(
+					interaction,
+					textComponent('Close', ['This command can only be used in a ticket channel.']),
+					{ fallback: 'This command can only be used in a ticket channel.' }
+				);
+				return;
+			}
+
 			const unix = Math.floor(scheduledAt.getTime() / 1000);
-			const reasonPart = reason ? ` Reason: ${reason}` : '';
-			const line = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${reasonPart}`;
-			await respondComponents(interaction, textComponent('Close', [line]), { fallback: line });
+			const fallback = `Ticket scheduled to close <t:${unix}:R> (<t:${unix}:f>).${
+				reason ? ` Reason: ${reason}` : ''
+			}`;
+			await respondComponents(
+				interaction,
+				textComponent('Close', [fallback]),
+				{ fallback }
+			);
+			await TicketCloseService.scheduleClose({
+				threadId: thread.id,
+				closesAt: scheduledAt,
+				reason,
+				executedBy: interaction.user.id,
+				staffChannel: interaction.channel
+			});
 			return;
 		}
 

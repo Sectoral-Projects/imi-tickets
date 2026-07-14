@@ -90,18 +90,26 @@ export function stripLinkPreviewUrls(text: string, previews: RelayLinkPreview[])
 	const youtubeIds = new Set<string>();
 
 	for (const preview of previews) {
+		if (isYoutubeLinkPreview(preview)) {
+			const markdown = youtubeMarkdownLink(preview.url);
+			// Keep a readable in-place marker for the transcript (and Discord V2 body).
+			result = result.split(preview.url).join(result.includes(markdown) ? '' : markdown);
+			const videoId = extractYoutubeVideoId(preview.url);
+			if (videoId) youtubeIds.add(videoId);
+			continue;
+		}
+
 		result = result.split(preview.url).join('');
-		const videoId = extractYoutubeVideoId(preview.url);
-		if (videoId) youtubeIds.add(videoId);
 	}
 
 	for (const videoId of youtubeIds) {
+		// Skip URLs already inside `[YouTube](<...>)` so we do not nest replacements.
 		result = result.replace(
 			new RegExp(
-				`https?:\\/\\/(?:www\\.)?(?:youtube\\.com\\/watch\\?v=${videoId}(?:&[^\\s]*)?|youtu\\.be\\/${videoId}(?:\\?[^\\s]*)?)`,
+				`(?<!\\]\\(<)https?:\\/\\/(?:www\\.)?(?:youtube\\.com\\/watch\\?v=${videoId}(?:&[^\\s<>]*)?|youtu\\.be\\/${videoId}(?:\\?[^\\s<>]*)?|youtube\\.com\\/shorts\\/${videoId}(?:\\?[^\\s<>]*)?)`,
 				'gi'
 			),
-			''
+			(match) => youtubeMarkdownLink(match)
 		);
 	}
 
@@ -224,6 +232,86 @@ export function extractYoutubeVideoId(url: string) {
 	}
 
 	return null;
+}
+
+export function isYoutubeLinkPreview(preview: RelayLinkPreview) {
+	if (preview.provider && /^youtube$/i.test(preview.provider)) return true;
+	return Boolean(extractYoutubeVideoId(preview.url));
+}
+
+export function canonicalizeYoutubeWatchUrl(url: string) {
+	const videoId = extractYoutubeVideoId(url);
+	return videoId ? `https://www.youtube.com/watch?v=${videoId}` : url.trim();
+}
+
+export function youtubeMarkdownLink(url: string) {
+	return `[YouTube](<${canonicalizeYoutubeWatchUrl(url)}>)`;
+}
+
+const YOUTUBE_URL_IN_TEXT_PATTERN =
+	/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?[^\s<>]*v=[\w-]+[^\s<>]*|shorts\/[\w-]+[^\s<>]*|embed\/[\w-]+[^\s<>]*)|youtu\.be\/[\w-]+[^\s<>]*)/gi;
+
+/** Collect unique YouTube watch URLs from relay text + link previews. */
+export function collectYoutubeWatchUrls(input: {
+	text?: string;
+	linkPreviews?: RelayLinkPreview[];
+}): string[] {
+	const byId = new Map<string, string>();
+
+	for (const preview of input.linkPreviews ?? []) {
+		if (!isYoutubeLinkPreview(preview)) continue;
+		const videoId = extractYoutubeVideoId(preview.url);
+		if (!videoId || byId.has(videoId)) continue;
+		byId.set(videoId, canonicalizeYoutubeWatchUrl(preview.url));
+	}
+
+	const text = input.text ?? '';
+	for (const match of text.matchAll(YOUTUBE_URL_IN_TEXT_PATTERN)) {
+		const videoId = extractYoutubeVideoId(match[0]);
+		if (!videoId || byId.has(videoId)) continue;
+		byId.set(videoId, canonicalizeYoutubeWatchUrl(match[0]));
+	}
+
+	return [...byId.values()];
+}
+
+export function stripYoutubeUrlsFromText(text: string) {
+	return text
+		.replace(YOUTUBE_URL_IN_TEXT_PATTERN, '')
+		.replace(/\[YouTube\]\(<https?:\/\/[^>]+>\)/gi, '')
+		.replace(/\[YouTube\]\(https?:\/\/[^)]+\)/gi, '')
+		.split('\n')
+		.map((line) => line.trimEnd())
+		.filter((line, index, lines) => line.length > 0 || (index > 0 && lines[index - 1]?.length > 0))
+		.join('\n')
+		.trim();
+}
+
+export function isYoutubeOnlyText(text: string) {
+	const trimmed = text.trim();
+	if (!trimmed) return false;
+	return stripYoutubeUrlsFromText(trimmed).length === 0 && collectYoutubeWatchUrls({ text: trimmed }).length > 0;
+}
+
+/** Replace raw YouTube URLs with embed-suppressed markdown links for Components V2 text. */
+export function replaceYoutubeUrlsWithMarkdownLinks(text: string) {
+	return text.replace(YOUTUBE_URL_IN_TEXT_PATTERN, (match) => youtubeMarkdownLink(match));
+}
+
+/**
+ * Build Components V2 body text: turn raw YouTube URLs into `[YouTube](<url>)`,
+ * and if URLs were already stripped (legacy), append those markdown links.
+ */
+export function buildRelayTextWithYoutubeMarkdown(text: string, youtubeUrls: string[]) {
+	let result = replaceYoutubeUrlsWithMarkdownLinks(text);
+
+	for (const url of youtubeUrls) {
+		const markdown = youtubeMarkdownLink(url);
+		if (result.includes(markdown) || result.includes(canonicalizeYoutubeWatchUrl(url))) continue;
+		result = result.trim() ? `${result.trim()}\n${markdown}` : markdown;
+	}
+
+	return result.trim();
 }
 
 function linkPreviewMergeKey(url: string) {

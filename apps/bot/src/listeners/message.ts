@@ -19,6 +19,7 @@ import { NoteService } from '@/services/note';
 import { PendingTicketService } from '@/services/pendingTicket';
 import { SettingsService, TicketOpenButtonMode } from '@/services/settings';
 import { TicketChannelService } from '@/services/ticketChannel';
+import { TicketCloseService } from '@/services/ticketClose';
 import { TicketOpenService } from '@/services/ticketOpen';
 import { TicketParticipantService } from '@/services/ticketParticipant';
 import { TicketService } from '@/services/ticket';
@@ -86,6 +87,9 @@ export class MessageEvent extends Listener {
 		const openThread = TicketService.findOpenThreadForUser(message.author.id);
 
 		if (openThread) {
+			// Member activity cancels a pending staff-scheduled close.
+			await TicketCloseService.cancelScheduledClose(openThread.id, message.author.id);
+
 			const relayResults = openThread.channelId
 				? await TicketChannelService.relayMemberMessage(message, openThread)
 				: [];
@@ -118,6 +122,10 @@ export class MessageEvent extends Listener {
 	private async handleGuildTicketMessage(message: Message) {
 		const thread = TicketService.findOpenByStaffChannelId(message.channel.id);
 		if (!thread) return;
+
+		// Any human message in the ticket channel cancels a pending scheduled close,
+		// even if the message is not relayed to members.
+		await TicketCloseService.cancelScheduledClose(thread.id, message.author.id);
 
 		const memberParticipants = TicketService.listUserParticipants(thread.id);
 		if (memberParticipants.length === 0) return;

@@ -124,7 +124,7 @@ export function MessageReactions({
   if (reactions.length === 0) return null;
 
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
       {reactions.map((reaction) => {
         const reacted = Boolean(
           currentUserId && reaction.userIds.includes(currentUserId),
@@ -137,7 +137,7 @@ export function MessageReactions({
           >
             <span
               className={cn(
-                "inline-flex h-[22px] min-w-[22px] cursor-default items-center gap-1 rounded-lg px-1.5 text-xs font-medium tabular-nums transition-colors",
+                "inline-flex h-7 min-w-7 cursor-default items-center gap-1.5 rounded-lg px-2 text-sm font-medium tabular-nums transition-colors",
                 reacted
                   ? "border border-primary/25 bg-primary/10 text-primary"
                   : "border border-transparent bg-muted/70 text-muted-foreground hover:border-border hover:bg-muted",

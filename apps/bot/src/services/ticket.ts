@@ -71,7 +71,12 @@ export interface ListTicketsResult {
 
 export abstract class TicketService {
 	static findOpenThreadForUser(userId: string, db: DbClient = container.sqlite) {
-		const participant = db
+		return this.listOpenThreadsForUserParticipant(userId, db)[0] ?? null;
+	}
+
+	/** All open tickets where this Discord user is an active member participant. */
+	static listOpenThreadsForUserParticipant(userId: string, db: DbClient = container.sqlite) {
+		const byParticipant = db
 			.select({ threadId: threadParticipants.threadId })
 			.from(threadParticipants)
 			.innerJoin(threads, eq(threads.id, threadParticipants.threadId))
@@ -84,19 +89,24 @@ export abstract class TicketService {
 					isNull(threads.deletedAt)
 				)
 			)
-			.limit(1)
-			.get();
+			.all()
+			.map((row) => row.threadId);
 
-		if (participant) {
-			return db.select().from(threads).where(eq(threads.id, participant.threadId)).get();
-		}
+		const byOwner = db
+			.select({ id: threads.id })
+			.from(threads)
+			.where(and(eq(threads.userId, userId), eq(threads.status, ThreadStatus.Open), isNull(threads.deletedAt)))
+			.all()
+			.map((row) => row.id);
+
+		const threadIds = [...new Set([...byParticipant, ...byOwner])];
+		if (threadIds.length === 0) return [];
 
 		return db
 			.select()
 			.from(threads)
-			.where(and(eq(threads.userId, userId), eq(threads.status, ThreadStatus.Open), isNull(threads.deletedAt)))
-			.limit(1)
-			.get();
+			.where(and(inArray(threads.id, threadIds), eq(threads.status, ThreadStatus.Open), isNull(threads.deletedAt)))
+			.all();
 	}
 
 	static findById(threadId: number, db: DbClient = container.sqlite) {
@@ -157,25 +167,60 @@ export abstract class TicketService {
 			.run();
 	}
 
-	static setScheduledClose(threadId: number, at: Date, db: DbClient = container.sqlite) {
+	static setScheduledClose(
+		threadId: number,
+		at: Date,
+		notices: {
+			closesAt: number;
+			reason?: string;
+			auditId?: number;
+			messages: Array<{ channelId: string; messageId: string }>;
+		} | null = null,
+		db: DbClient = container.sqlite
+	) {
 		return db
 			.update(threads)
-			.set({ scheduledCloseAt: at })
+			.set({
+				scheduledCloseAt: at,
+				scheduledCloseNotices: notices
+			})
 			.where(and(eq(threads.id, threadId), eq(threads.status, ThreadStatus.Open), isNull(threads.deletedAt)))
 			.run();
 	}
 
-	/** Clears a pending scheduled close. Returns true when a schedule was present. */
-	static clearScheduledClose(threadId: number, db: DbClient = container.sqlite): boolean {
+	/**
+	 * Clears a pending scheduled close.
+	 * Returns the stored notice payload when a schedule was present (for Discord edits).
+	 */
+	static clearScheduledClose(
+		threadId: number,
+		db: DbClient = container.sqlite
+	): {
+		closesAt: number;
+		reason?: string;
+		auditId?: number;
+		messages: Array<{ channelId: string; messageId: string }>;
+	} | null {
 		const existing = db
-			.select({ scheduledCloseAt: threads.scheduledCloseAt })
+			.select({
+				scheduledCloseAt: threads.scheduledCloseAt,
+				scheduledCloseNotices: threads.scheduledCloseNotices
+			})
 			.from(threads)
 			.where(eq(threads.id, threadId))
 			.get();
-		if (!existing?.scheduledCloseAt) return false;
+		if (!existing?.scheduledCloseAt) return null;
 
-		db.update(threads).set({ scheduledCloseAt: null }).where(eq(threads.id, threadId)).run();
-		return true;
+		const notices = existing.scheduledCloseNotices ?? {
+			closesAt: existing.scheduledCloseAt.getTime(),
+			messages: []
+		};
+
+		db.update(threads)
+			.set({ scheduledCloseAt: null, scheduledCloseNotices: null })
+			.where(eq(threads.id, threadId))
+			.run();
+		return notices;
 	}
 
 	static setAutoCloseDisabled(threadId: number, disabled: boolean, db: DbClient = container.sqlite) {
@@ -325,7 +370,12 @@ export abstract class TicketService {
 
 			const thread = tx
 				.update(threads)
-				.set({ status: ThreadStatus.Closed, closedAt: now, scheduledCloseAt: null })
+				.set({
+					status: ThreadStatus.Closed,
+					closedAt: now,
+					scheduledCloseAt: null,
+					scheduledCloseNotices: null
+				})
 				.where(eq(threads.id, data.threadId))
 				.returning()
 				.get();
@@ -587,6 +637,25 @@ export abstract class TicketService {
 				)
 			)
 			.get();
+	}
+
+	static setParticipantDmUnreachable(
+		threadId: number,
+		userId: string,
+		unreachable: boolean,
+		db: DbClient = container.sqlite
+	) {
+		return db
+			.update(threadParticipants)
+			.set({ dmUnreachable: unreachable })
+			.where(
+				and(
+					eq(threadParticipants.threadId, threadId),
+					eq(threadParticipants.userId, userId),
+					eq(threadParticipants.role, ParticipantRole.User)
+				)
+			)
+			.run();
 	}
 
 	static isUserParticipant(threadId: number, userId: string, db: DbClient = container.sqlite) {

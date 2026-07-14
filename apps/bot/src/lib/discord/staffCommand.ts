@@ -97,7 +97,7 @@ export async function respondComponents(
 	target: CommandTarget,
 	components: APIMessageTopLevelComponent[],
 	options?: { fallback?: string }
-) {
+): Promise<Message | null> {
 	try {
 		if ('user' in target) {
 			if (target.deferred || target.replied) {
@@ -106,7 +106,7 @@ export async function respondComponents(
 					flags: [...componentReplyFlags],
 					allowedMentions: { parse: [] }
 				});
-				return;
+				return null;
 			}
 
 			await target.reply({
@@ -114,10 +114,10 @@ export async function respondComponents(
 				flags: [...ephemeralComponentReplyFlags],
 				allowedMentions: { parse: [] }
 			});
-			return;
+			return null;
 		}
 
-		await target.reply({
+		return await target.reply({
 			components,
 			flags: [...componentReplyFlags],
 			allowedMentions: { parse: [] }
@@ -125,6 +125,7 @@ export async function respondComponents(
 	} catch (error) {
 		container.logger.warn('Failed to send Component V2 staff command reply', error);
 		await replyText(target, options?.fallback ?? 'Command completed, but the response could not be displayed.');
+		return null;
 	}
 }
 

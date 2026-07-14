@@ -1,6 +1,6 @@
 import { auditLog } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { AuditDiscordService } from './auditDiscord';
 import type { DbClient } from './types';
 
@@ -16,6 +16,8 @@ export const AuditAction = {
 	ThreadRenamed: 'thread.renamed',
 	ThreadTagAdded: 'thread.tag.added',
 	ThreadTagRemoved: 'thread.tag.removed',
+	ThreadCloseScheduled: 'thread.close.scheduled',
+	ThreadCloseScheduleCancelled: 'thread.close.schedule_cancelled',
 
 	MessageCreated: 'message.created',
 	MessageUpdated: 'message.updated',
@@ -43,7 +45,9 @@ export const AuditAction = {
 	DataBulkDeleted: 'data.bulk_deleted',
 
 	ParticipantAdded: 'participant.added',
-	ParticipantRemoved: 'participant.removed'
+	ParticipantRemoved: 'participant.removed',
+	ParticipantDmsUnavailable: 'participant.dms_unavailable',
+	ParticipantDmsAvailable: 'participant.dms_available'
 } as const;
 
 export type AuditActionType = (typeof AuditAction)[keyof typeof AuditAction] | (string & {});
@@ -87,6 +91,48 @@ export abstract class AuditService {
 		AuditDiscordService.notify(entry);
 
 		return entry;
+	}
+
+	/**
+	 * Replaces an existing audit row in place (same id/timestamp) so timeline markers
+	 * can morph without adding a second entry — e.g. scheduled close → cancelled.
+	 */
+	static replace(
+		id: number,
+		data: Pick<AuditLogInput, 'action' | 'executedBy' | 'payload'>,
+		db: DbClient = container.sqlite
+	) {
+		const entry = db
+			.update(auditLog)
+			.set({
+				action: data.action,
+				executedBy: data.executedBy,
+				payload: data.payload === undefined ? null : (data.payload as object)
+			})
+			.where(eq(auditLog.id, id))
+			.returning()
+			.get();
+
+		if (entry) {
+			AuditDiscordService.notify(entry);
+		}
+
+		return entry ?? null;
+	}
+
+	/** Latest lifecycle audit of the given action for a thread, if any. */
+	static findLatestForThread(
+		threadId: number,
+		action: AuditActionType,
+		db: DbClient = container.sqlite
+	) {
+		return db
+			.select()
+			.from(auditLog)
+			.where(and(eq(auditLog.threadId, threadId), eq(auditLog.action, action)))
+			.orderBy(desc(auditLog.createdAt))
+			.limit(1)
+			.get();
 	}
 
 	/** Convenience read helper for building a thread's activity timeline. */

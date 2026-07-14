@@ -9,8 +9,10 @@ import { DiscordChannelService } from './discordChannel';
 import { componentsToTranscriptText } from '@/lib/components/util/transcriptText';
 import { StaffContact, STAFF_CONTACT_NOTICE } from '@/lib/components/staffContact';
 import { OutboundDmGuard } from '@/lib/discord/outboundDmGuard';
+import { logDmSendFailure } from '@/lib/discord/dmErrors';
 import { extractRelayContent } from '@/lib/discord/relayContent';
 import { linkPreviewAttachmentName, isYoutubeThumbnailUrl } from '@/lib/discord/linkPreview';
+import { ParticipantDmStatusService } from './participantDmStatus';
 import type { Message, User } from 'discord.js';
 
 export interface OpenTicketFromContentInput {
@@ -148,15 +150,23 @@ export abstract class TicketOpenService {
 		threadId: number,
 		dmChannelId: string,
 		executedBy: string,
-		options: { recordTranscript?: boolean } = {}
+		options: { recordTranscript?: boolean; userId?: string } = {}
 	) {
 		const recordTranscript = options.recordTranscript ?? true;
 		const components = await StaffContact.render();
+		const userId =
+			options.userId ??
+			TicketService.listUserParticipants(threadId).find((p) => p.dmChannelId === dmChannelId)?.userId ??
+			TicketService.findById(threadId)?.userId;
 		OutboundDmGuard.mark(dmChannelId);
 
 		try {
 			const sent = await DiscordChannelService.sendComponents(dmChannelId, components);
 			if (!sent) return;
+
+			if (userId) {
+				await ParticipantDmStatusService.noteReachable(threadId, userId);
+			}
 
 			if (recordTranscript) {
 				MessageService.create({
@@ -167,6 +177,11 @@ export abstract class TicketOpenService {
 					content: componentsToTranscriptText(components) || STAFF_CONTACT_NOTICE,
 					executedBy
 				});
+			}
+		} catch (error) {
+			logDmSendFailure(`Failed to send staff contact DM for ticket ${threadId}`, error);
+			if (userId) {
+				await ParticipantDmStatusService.noteUnreachable(threadId, userId, { error });
 			}
 		} finally {
 			OutboundDmGuard.unmark(dmChannelId);

@@ -162,6 +162,34 @@
       "when": 1784500000000,
       "tag": "0022_attachment_dimensions",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1784600000000,
+      "tag": "0023_scheduled_close_notices",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1784700000000,
+      "tag": "0024_message_staff_command",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1784800000000,
+      "tag": "0025_participant_dm_unreachable",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1784900000000,
+      "tag": "0026_message_relays_multi",
+      "breakpoints": true
     }
   ]
 }

@@ -63,7 +63,7 @@ export class TypingEvent extends Listener {
 		for (const participant of participants) {
 			const dmChannel = await TicketChannelService.resolveParticipantDmChannel(participant, thread.id);
 			if (!dmChannel?.isDMBased() || !('sendTyping' in dmChannel)) continue;
-			await dmChannel.sendTyping();
+			await dmChannel.sendTyping().catch(() => null);
 		}
 	}
 }

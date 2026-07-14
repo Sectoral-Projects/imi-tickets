@@ -33,7 +33,6 @@ export class CustomClient extends SapphireClient {
 				GatewayIntentBits.Guilds,
 				GatewayIntentBits.MessageContent,
 				GatewayIntentBits.GuildMembers,
-				GatewayIntentBits.GuildPresences,
 				GatewayIntentBits.DirectMessageTyping,
 				GatewayIntentBits.GuildMessageTyping
 			],

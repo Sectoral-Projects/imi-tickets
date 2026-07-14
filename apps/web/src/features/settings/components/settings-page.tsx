@@ -38,6 +38,7 @@ import { normalizeTicketOpenButtonMode } from "@/features/templates/constants";
 import { SettingsPageSkeleton } from "./settings-page-skeleton";
 import { ChannelPanelSettingsSection } from "./channel-panel-settings";
 import { DataPrivacySettingsSection } from "./data-privacy-settings";
+import { WhitelabelSettingsSection } from "./whitelabel-settings";
 import {
   StaffRoleAliasesEditor,
   staffRoleAliasesEqual,
@@ -49,7 +50,6 @@ import {
 import { MultiSearchableSelect } from "@/components/multi-searchable-select";
 import { UnauthorizedScreen } from "@/components/unauthorized-screen";
 import { ApiError } from "@/lib/api";
-import type { NotifyOnNewThreadPresence } from "../schemas/settings";
 
 type SettingsDraft = {
   settings: AppSettings;
@@ -113,6 +113,7 @@ export function SettingsContent() {
   const [templateEdits, setTemplateEdits] = useState<Record<string, TemplateEditDraft>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState("general");
 
   useProductAccessRedirect(error);
 
@@ -125,8 +126,6 @@ export function SettingsContent() {
         forwardTemplateButtonsToStaff: data.settings.forwardTemplateButtonsToStaff ?? true,
         staffRoleAliases: data.settings.staffRoleAliases ?? [],
         notifyOnNewThreadRoleIds: data.settings.notifyOnNewThreadRoleIds ?? [],
-        notifyOnNewThreadPresence:
-          data.settings.notifyOnNewThreadPresence ?? (["all"] as NotifyOnNewThreadPresence[]),
         commandPrefix: data.settings.commandPrefix ?? ";",
         privateMessagePrefix: data.settings.privateMessagePrefix ?? "`",
         dmWordBlacklist: data.settings.dmWordBlacklist ?? [],
@@ -202,10 +201,6 @@ export function SettingsContent() {
       !stringArraysEqual(
         draft.settings.notifyOnNewThreadRoleIds,
         data.settings.notifyOnNewThreadRoleIds,
-      ) ||
-      !stringArraysEqual(
-        draft.settings.notifyOnNewThreadPresence,
-        data.settings.notifyOnNewThreadPresence ?? ["all"],
       ) ||
       (draft.settings.closeAfterMinutes ?? null) !==
         (data.settings.closeAfterMinutes ?? null) ||
@@ -374,8 +369,6 @@ export function SettingsContent() {
             autoTagClosedThreads: draft.settings.autoTagClosedThreads,
             notifyOnNewThread: draft.settings.notifyOnNewThread,
             notifyOnNewThreadRoleIds: draft.settings.notifyOnNewThreadRoleIds ?? [],
-            notifyOnNewThreadPresence:
-              draft.settings.notifyOnNewThreadPresence ?? (["all"] as NotifyOnNewThreadPresence[]),
             closeAfterMinutes: draft.settings.closeAfterMinutes ?? null,
             autoCloseReminderMinutes: autoCloseEnabled
               ? (draft.settings.autoCloseReminderMinutes ?? null)
@@ -495,7 +488,13 @@ export function SettingsContent() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs
+        value={settingsTab}
+        onValueChange={(value) => {
+          if (value) setSettingsTab(value);
+        }}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
         <div className="mx-auto w-full max-w-3xl shrink-0 space-y-4 px-4 pt-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
@@ -509,6 +508,9 @@ export function SettingsContent() {
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="templates">Templates</TabsTrigger>
+            {data?.canAdmin ? (
+              <TabsTrigger value="whitelabel">Whitelabel</TabsTrigger>
+            ) : null}
             {data?.canAdmin ? (
               <TabsTrigger value="data-privacy">Data &amp; privacy</TabsTrigger>
             ) : null}
@@ -793,53 +795,8 @@ export function SettingsContent() {
                       }
                     />
                     <p className="text-sm text-muted-foreground">
-                      With All statuses, these roles are pinged directly. With a
-                      presence filter, matching online members who hold any of these
-                      roles are pinged individually.
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="notify-presence">Presence filter</Label>
-                    <MultiSearchableSelect
-                      options={[
-                        { value: "online", label: "Online" },
-                        { value: "idle", label: "Away" },
-                        { value: "dnd", label: "Do not disturb" },
-                        { value: "all", label: "All statuses" },
-                      ]}
-                      value={
-                        draft.settings.notifyOnNewThreadPresence ?? [
-                          "all" as NotifyOnNewThreadPresence,
-                        ]
-                      }
-                      disabled={readOnly || updateSettings.isPending}
-                      placeholder="Select presence statuses"
-                      searchPlaceholder="Search statuses…"
-                      emptyText="No statuses found."
-                      onValueChange={(statuses) => {
-                        const next = statuses as NotifyOnNewThreadPresence[];
-                        const prev = draft.settings.notifyOnNewThreadPresence ?? [
-                          "all" as NotifyOnNewThreadPresence,
-                        ];
-                        const addedAll =
-                          next.includes("all") && !prev.includes("all");
-                        const selectedSpecific = next.filter(
-                          (status) => status !== "all",
-                        );
-                        updateSetting(
-                          "notifyOnNewThreadPresence",
-                          addedAll
-                            ? (["all"] as NotifyOnNewThreadPresence[])
-                            : selectedSpecific.length > 0
-                              ? selectedSpecific
-                              : (["all"] as NotifyOnNewThreadPresence[]),
-                        );
-                      }}
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      All statuses pings the selected roles. Other options ping only
-                      staff currently in those Discord statuses (requires Presence +
-                      Server Members intents).
+                      These roles are pinged in the ticket channel when a ticket
+                      opens.
                     </p>
                   </div>
                 </div>
@@ -949,6 +906,12 @@ export function SettingsContent() {
         </TabsContent>
 
         {data?.canAdmin ? (
+          <TabsContent value="whitelabel">
+            <WhitelabelSettingsSection disabled={adminOnly} />
+          </TabsContent>
+        ) : null}
+
+        {data?.canAdmin ? (
           <TabsContent value="data-privacy">
             <DataPrivacySettingsSection disabled={adminOnly} />
           </TabsContent>
@@ -957,7 +920,8 @@ export function SettingsContent() {
           </div>
         </ScrollArea>
 
-        {saveError || !readOnly ? (
+        {(saveError || !readOnly) &&
+        (settingsTab === "general" || settingsTab === "templates") ? (
           <div className="mx-auto w-full max-w-3xl shrink-0 space-y-3 border-t border-border px-4 py-4 sm:px-6">
             {saveError ? (
               <p className="text-sm text-destructive">{saveError}</p>

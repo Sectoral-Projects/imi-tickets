@@ -13,6 +13,7 @@ import { MessageMarkdown } from "./message-markdown";
 import { MessageCopyMenu } from "./message-copy-menu";
 import { MessageEditIndicator } from "./message-edit-indicator";
 import { MessageDeletedIndicator } from "./message-deleted-indicator";
+import { MessageStaffCommandIndicator } from "./message-staff-command-indicator";
 import { MessageReactions } from "./message-reactions";
 import {
   MessageReplyLeadingColumn,
@@ -325,6 +326,7 @@ export function MessageTimelineRow({
               <span className="text-xs text-muted-foreground">
                 {new Date(message.createdAt).toLocaleString()}
               </span>
+              <MessageStaffCommandIndicator message={message} />
               <MessageDeletedIndicator message={message} />
               <MessageEditIndicator message={message} />
             </div>
@@ -365,9 +367,11 @@ export function MessageTimelineRow({
             {message.revision > 1 ||
             message.updatedAt ||
             message.deletedAt ||
-            message.isPrivateStaff ? (
+            message.isPrivateStaff ||
+            message.staffCommand ? (
               <div className="absolute right-0 top-0 flex items-center gap-2">
                 {message.isPrivateStaff ? <PrivateMessageBadge /> : null}
+                <MessageStaffCommandIndicator message={message} />
                 <MessageDeletedIndicator message={message} />
                 {message.revision > 1 || message.updatedAt ? (
                   <MessageEditIndicator message={message} />

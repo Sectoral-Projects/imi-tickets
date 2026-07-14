@@ -60,6 +60,8 @@ export type Message = {
   content: string;
   isForwarded: boolean;
   isPrivateStaff: boolean;
+  /** Staff template command that produced this message, including prefix (e.g. `;faq`). */
+  staffCommand: string | null;
   replyToMessageId: number | null;
   revision: number;
   createdAt: string;

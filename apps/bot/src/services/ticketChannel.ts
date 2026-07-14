@@ -1,5 +1,17 @@
 import { Message as RelayMessage } from '@/lib/components/message';
-import { extractRelayContent, type RelayContent } from '@/lib/discord/relayContent';
+import {
+	extractRelayContent,
+	materializeRelayMediaForDiscord,
+	type RelayContent
+} from '@/lib/discord/relayContent';
+import {
+	buildRelayTextWithYoutubeMarkdown,
+	collectYoutubeWatchUrls,
+	extractLinkPreviewsFromText,
+	isYoutubeLinkPreview,
+	isYoutubeOnlyText,
+	stripLinkPreviewUrls
+} from '@/lib/discord/linkPreview';
 import { reactionEmojiMatches, type StoredReactionEmoji } from '@/lib/discord/reactionEmoji';
 import { StaffTicketOpenProfile } from '@/lib/components/staffTicketOpenProfile';
 import { guildStaffRolePermissions, linkedGuilds, messages } from '@/database/sqlite/schema';
@@ -21,16 +33,18 @@ import {
 	type User
 } from 'discord.js';
 import { eq } from 'drizzle-orm';
-import { SettingsService, NotifyOnNewThreadPresence } from './settings';
+import { SettingsService } from './settings';
 import { ChannelStrategy, SetupService } from './setup';
 import { MessageRelayService } from './messageRelay';
 import { MessageService } from './message';
 import { TicketService, ParticipantRole } from './ticket';
 import { resolveStaffAuthorLabel } from '@/lib/discord/staffAuthorLabel';
+import { logDmSendFailure } from '@/lib/discord/dmErrors';
 import { renderTicketChannelName, sanitizeTicketChannelName, usernameSlug } from '@/lib/ticket/channelName';
 import { formatChannelRenameError } from '@/lib/discord/channelRename';
 import { TRANSCRIPT_SYSTEM_AUTHOR_ID } from '@/lib/transcript/systemMessage';
 import { AuditAction, AuditService } from './audit';
+import { ParticipantDmStatusService } from './participantDmStatus';
 import { RealtimeService } from './realtime';
 import { MemberSnapshotService } from './snapshot';
 import type { DbClient } from './types';
@@ -217,12 +231,22 @@ export abstract class TicketChannelService {
 		const user = await container.client.users.fetch(participant.userId).catch(() => null);
 		if (!user) return null;
 
-		const dmChannel = await user.createDM();
-		if (threadId && participant.dmChannelId !== dmChannel.id) {
-			TicketService.addParticipant(threadId, participant.userId, ParticipantRole.User, { dmChannelId: dmChannel.id }, db);
+		try {
+			const dmChannel = await user.createDM();
+			if (threadId && participant.dmChannelId !== dmChannel.id) {
+				TicketService.addParticipant(threadId, participant.userId, ParticipantRole.User, { dmChannelId: dmChannel.id }, db);
+			}
+			return dmChannel;
+		} catch (error) {
+			if (threadId) {
+				await ParticipantDmStatusService.noteUnreachable(threadId, participant.userId, {
+					user,
+					error,
+					db
+				});
+			}
+			return null;
 		}
-
-		return dmChannel;
 	}
 
 	static async resolveMemberDmChannel(thread: { id?: number; userId: string; dmChannelId?: string | null }) {
@@ -254,17 +278,14 @@ export abstract class TicketChannelService {
 		if (thread.channelId) {
 			const channel = await container.client.channels.fetch(thread.channelId).catch(() => null);
 			if (channel?.isTextBased() && channel.isSendable()) {
-				const payload = await this.buildRelayPayloadFromMessage(message, message.author.tag, {
-					disableMentions: true
-				});
 				const replyToMessageId = referencedMessageId
 					? MessageService.resolveRelayReplyTarget(referencedMessageId, message.channel.id, thread.channelId)
 					: undefined;
-				const sent = await this.sendRelayPayload(channel, payload, replyToMessageId);
-				deliveries.push({
-					targetChannelId: thread.channelId,
-					relayMessageId: sent.id
+				const sent = await this.deliverRelayToChannel(channel, message, message.author.tag, {
+					disableMentions: true,
+					replyToMessageId
 				});
+				deliveries.push(...sent);
 			}
 		}
 
@@ -277,16 +298,24 @@ export abstract class TicketChannelService {
 			if (!dmChannel?.isDMBased()) continue;
 
 			const authorLabel = TicketService.memberAuthorLabel(thread, message.author.id, message.author.tag);
-			const payload = await this.buildRelayPayloadFromMessage(message, authorLabel);
 			const replyToMessageId = referencedMessageId
 				? MessageService.resolveRelayReplyTarget(referencedMessageId, message.channel.id, dmChannel.id)
 				: undefined;
-			const sent = await this.sendRelayPayload(dmChannel, payload, replyToMessageId);
-			deliveries.push({
-				targetChannelId: dmChannel.id,
-				relayMessageId: sent.id,
+			const sent = await this.deliverRelayToChannel(dmChannel, message, authorLabel, {
+				replyToMessageId,
 				recipientUserId: participant.userId
+			}).catch(async (error) => {
+				logDmSendFailure(
+					`Failed to relay member message to participant ${participant.userId} on ticket ${thread.id}`,
+					error
+				);
+				await ParticipantDmStatusService.noteUnreachable(thread.id, participant.userId, { error });
+				return [] as RelayDelivery[];
 			});
+			if (sent.length === 0) continue;
+
+			await ParticipantDmStatusService.noteReachable(thread.id, participant.userId);
+			deliveries.push(...sent);
 		}
 
 		return deliveries;
@@ -298,7 +327,6 @@ export abstract class TicketChannelService {
 		db: DbClient = container.sqlite
 	): Promise<RelayDelivery[]> {
 		const authorLabel = await resolveStaffAuthorLabel(message, db);
-		const payload = await this.buildRelayPayloadFromMessage(message, authorLabel);
 		const deliveries: RelayDelivery[] = [];
 		const participants = TicketService.listUserParticipants(thread.id, db);
 		const referencedMessageId = MessageService.getReferencedDiscordMessageId(message);
@@ -310,12 +338,22 @@ export abstract class TicketChannelService {
 			const replyToMessageId = referencedMessageId
 				? MessageService.resolveRelayReplyTarget(referencedMessageId, message.channel.id, channel.id, db)
 				: undefined;
-			const sent = await this.sendRelayPayload(channel, payload, replyToMessageId);
-			deliveries.push({
-				targetChannelId: channel.id,
-				relayMessageId: sent.id,
+			const sent = await this.deliverRelayToChannel(channel, message, authorLabel, {
+				replyToMessageId,
 				recipientUserId: participant.userId
+			}).catch(async (error) => {
+				logDmSendFailure(
+					`Failed to relay staff message to participant ${participant.userId} on ticket ${thread.id}`,
+					error
+				);
+				await ParticipantDmStatusService.noteUnreachable(thread.id, participant.userId, { error, db });
+				return [] as RelayDelivery[];
 			});
+			if (sent.length === 0) continue;
+
+			// Post "DMs available" before the staff message is recorded in the transcript.
+			await ParticipantDmStatusService.noteReachable(thread.id, participant.userId, { db });
+			deliveries.push(...sent);
 
 			if (participant.userId === thread.userId && thread.id) {
 				TicketService.setDmChannelId(thread.id, channel.id, db);
@@ -341,26 +379,105 @@ export abstract class TicketChannelService {
 			userId: string;
 			hideMemberIdentities?: boolean;
 		},
-		options: { staffAuthorLabel?: string; memberTag?: string } = {}
+		options: {
+			staffAuthorLabel?: string;
+			memberTag?: string;
+			media?: RelayContent['media'];
+			linkPreviews?: RelayContent['linkPreviews'];
+			/** When true, clear prior Discord attachments before attaching rematerialized media. */
+			replaceAttachments?: boolean;
+		} = {}
 	) {
 		const relays = stored.id ? MessageRelayService.listByMessage(stored.id) : [];
+		const byChannel = new Map<string, typeof relays>();
 
-		if (relays.length === 0) {
+		for (const relay of relays) {
+			const list = byChannel.get(relay.targetChannelId) ?? [];
+			list.push(relay);
+			byChannel.set(relay.targetChannelId, list);
+		}
+
+		if (byChannel.size === 0) {
 			if (!stored.relayMessageId) return;
 			const targetChannelId =
 				stored.channelId === thread.dmChannelId ? thread.channelId : thread.dmChannelId;
 			if (!targetChannelId) return;
+			byChannel.set(targetChannelId, [
+				{
+					messageId: stored.id ?? 0,
+					targetChannelId,
+					relayMessageId: stored.relayMessageId,
+					recipientUserId: null
+				}
+			]);
+		}
+
+		for (const [targetChannelId, channelRelays] of byChannel) {
 			const authorLabel = this.resolveRelayAuthorLabel(thread, stored.authorId, targetChannelId, options);
-			await this.updateSingleRelayMessage(stored, thread, authorLabel, {
-				targetChannelId,
-				relayMessageId: stored.relayMessageId
-			});
+			await this.resyncChannelRelays(stored, thread, authorLabel, targetChannelId, channelRelays, options);
+		}
+	}
+
+	private static async resyncChannelRelays(
+		stored: {
+			id?: number;
+			channelId: string;
+			content: string;
+			isForwarded?: boolean;
+		},
+		thread: { id: number; channelId?: string | null; dmChannelId?: string | null; userId: string },
+		authorLabel: string | undefined,
+		targetChannelId: string,
+		channelRelays: { relayMessageId: string; recipientUserId?: string | null }[],
+		options: {
+			media?: RelayContent['media'];
+			linkPreviews?: RelayContent['linkPreviews'];
+		} = {}
+	) {
+		const relayChannel = await container.client.channels.fetch(targetChannelId).catch(() => null);
+		if (!relayChannel?.isTextBased() || !('send' in relayChannel)) {
+			container.logger.warn(`Could not resolve relay channel ${targetChannelId}`);
 			return;
 		}
 
-		for (const relay of relays) {
-			const authorLabel = this.resolveRelayAuthorLabel(thread, stored.authorId, relay.targetChannelId, options);
-			await this.updateSingleRelayMessage(stored, thread, authorLabel, relay);
+		for (const relay of channelRelays) {
+			await this.deleteDiscordMessage(targetChannelId, relay.relayMessageId);
+		}
+
+		const participantDmChannelIds = new Set(
+			TicketService.listUserParticipants(thread.id)
+				.map((participant) => participant.dmChannelId)
+				.filter((channelId): channelId is string => Boolean(channelId))
+		);
+		const toStaff = stored.channelId === thread.dmChannelId || participantDmChannelIds.has(stored.channelId);
+		const linkPreviews = options.linkPreviews ?? extractLinkPreviewsFromText(stored.content);
+		const recipientUserId = channelRelays.find((relay) => relay.recipientUserId)?.recipientUserId ?? undefined;
+
+		const deliveries = await this.deliverRelayContentToChannel(
+			relayChannel,
+			{
+				text: stored.content,
+				media: options.media ?? [],
+				attachments: [],
+				linkPreviews,
+				isForwarded: stored.isForwarded ?? false
+			},
+			authorLabel,
+			{
+				disableMentions: toStaff,
+				recipientUserId
+			}
+		);
+
+		if (stored.id) {
+			MessageRelayService.replaceForMessageChannel(
+				stored.id,
+				targetChannelId,
+				deliveries.map((delivery) => ({
+					relayMessageId: delivery.relayMessageId,
+					recipientUserId: delivery.recipientUserId
+				}))
+			);
 		}
 	}
 
@@ -542,49 +659,6 @@ export abstract class TicketChannelService {
 		return TicketService.memberAuthorLabel(thread, authorId, memberTag);
 	}
 
-	private static async updateSingleRelayMessage(
-		stored: { channelId: string; content: string; isForwarded?: boolean },
-		thread: { id: number; channelId?: string | null; dmChannelId?: string | null; userId: string },
-		authorLabel: string | undefined,
-		relay: { targetChannelId: string; relayMessageId: string }
-	) {
-		const relayChannel = await container.client.channels.fetch(relay.targetChannelId).catch(() => null);
-		if (!relayChannel?.isTextBased()) {
-			container.logger.warn(
-				`Could not resolve relay channel for message ${relay.relayMessageId} (target ${relay.targetChannelId})`
-			);
-			return;
-		}
-
-		const relayMessage = await relayChannel.messages.fetch(relay.relayMessageId).catch((error) => {
-			container.logger.warn(`Could not fetch relay message ${relay.relayMessageId}`, error);
-			return null;
-		});
-		if (!relayMessage?.editable) {
-			container.logger.warn(`Relay message ${relay.relayMessageId} is not editable`);
-			return;
-		}
-
-		const participantDmChannelIds = new Set(
-			TicketService.listUserParticipants(thread.id)
-				.map((participant) => participant.dmChannelId)
-				.filter((channelId): channelId is string => Boolean(channelId))
-		);
-		const toStaff = stored.channelId === thread.dmChannelId || participantDmChannelIds.has(stored.channelId);
-		const payload = await this.buildRelayPayload(stored.content, authorLabel, {
-			disableMentions: toStaff
-		}, undefined, undefined, stored.isForwarded ?? false);
-		await relayMessage
-			.edit({
-				components: payload.components,
-				flags: MessageFlags.IsComponentsV2,
-				...(toStaff ? { allowedMentions: DISABLED_MENTIONS } : {})
-			})
-			.catch((error) => {
-				container.logger.warn(`Failed to edit relay message ${relay.relayMessageId}`, error);
-			});
-	}
-
 	static async staffAuthorLabel(message: Message, db: DbClient = container.sqlite) {
 		return resolveStaffAuthorLabel(message, db);
 	}
@@ -750,12 +824,129 @@ export abstract class TicketChannelService {
 		});
 	}
 
-	private static async buildRelayPayloadFromMessage(
+	/**
+	 * Deliver a ticket message to one Discord channel.
+	 * YouTube-only → plain URL message(s) for native unfurl.
+	 * Mixed → Components V2 with `[YouTube](<url>)` plus plain URL follow-ups.
+	 * Transcript storage is unchanged (YouTube stays on link-preview attachments).
+	 */
+	private static async deliverRelayToChannel(
+		channel: { id: string; send: (options: MessageCreateOptions) => Promise<Message> },
 		message: Message,
-		author?: string,
-		options: { disableMentions?: boolean } = {}
-	) {
-		return this.buildRelayPayloadFromRelayContent(extractRelayContent(message), author, options, message.createdAt);
+		authorLabel: string | undefined,
+		options: {
+			disableMentions?: boolean;
+			replyToMessageId?: string;
+			recipientUserId?: string;
+		} = {}
+	): Promise<RelayDelivery[]> {
+		const relay = extractRelayContent(message);
+		return this.deliverRelayContentToChannel(channel, relay, authorLabel, {
+			...options,
+			timestamp: message.createdAt,
+			// Use the original Discord content for YouTube detection/transform — extractRelayContent
+			// strips YouTube from text so the website transcript can keep attachment embeds.
+			sourceText: message.content ?? ''
+		});
+	}
+
+	private static async deliverRelayContentToChannel(
+		channel: { id: string; send: (options: MessageCreateOptions) => Promise<Message> },
+		relay: RelayContent,
+		authorLabel: string | undefined,
+		options: {
+			disableMentions?: boolean;
+			replyToMessageId?: string;
+			recipientUserId?: string;
+			timestamp?: Date;
+			/** Raw message text before YouTube stripping (for Discord-only formatting). */
+			sourceText?: string;
+		} = {}
+	): Promise<RelayDelivery[]> {
+		const timestamp = options.timestamp ?? new Date();
+		const sourceText = options.sourceText ?? relay.text;
+		const youtubeUrls = collectYoutubeWatchUrls({
+			text: sourceText,
+			linkPreviews: relay.linkPreviews
+		});
+		const nonYoutubePreviews = relay.linkPreviews.filter((preview) => !isYoutubeLinkPreview(preview));
+		const youtubeOnly =
+			youtubeUrls.length > 0 &&
+			isYoutubeOnlyText(sourceText) &&
+			relay.media.length === 0 &&
+			nonYoutubePreviews.length === 0;
+
+		const deliveries: RelayDelivery[] = [];
+		const baseDelivery = {
+			targetChannelId: channel.id,
+			recipientUserId: options.recipientUserId
+		};
+
+		if (youtubeOnly) {
+			for (const [index, url] of youtubeUrls.entries()) {
+				const sent = await this.sendRelayPayload(
+					channel,
+					{
+						content: url,
+						...(options.disableMentions ? { allowedMentions: DISABLED_MENTIONS } : {})
+					},
+					index === 0 ? options.replyToMessageId : undefined
+				);
+				deliveries.push({ ...baseDelivery, relayMessageId: sent.id });
+			}
+			return deliveries;
+		}
+
+		// Format from the original Discord text so YouTube URLs stay in-place as
+		// `[YouTube](<url>)`. `relay.text` has already stripped them for the website transcript.
+		const textForDisplay = stripLinkPreviewUrls(
+			sourceText.trim() ? sourceText : relay.text,
+			nonYoutubePreviews
+		);
+		const displayText = buildRelayTextWithYoutubeMarkdown(textForDisplay, youtubeUrls);
+		const fallbackText =
+			relay.media.length > 0 || nonYoutubePreviews.length > 0 || youtubeUrls.length > 0
+				? ''
+				: '(no message content)';
+		const payload = await this.buildRelayPayload(
+			displayText || fallbackText,
+			authorLabel,
+			{ disableMentions: options.disableMentions },
+			timestamp,
+			relay.media,
+			relay.isForwarded,
+			nonYoutubePreviews
+		);
+
+		const hasV2Content = Boolean(
+			displayText.trim() ||
+				relay.media.length > 0 ||
+				nonYoutubePreviews.length > 0 ||
+				!youtubeUrls.length
+		);
+
+		let parentRelayMessageId: string | undefined;
+
+		if (hasV2Content || youtubeUrls.length === 0) {
+			const sent = await this.sendRelayPayload(channel, payload, options.replyToMessageId);
+			deliveries.push({ ...baseDelivery, relayMessageId: sent.id });
+			parentRelayMessageId = sent.id;
+		}
+
+		for (const url of youtubeUrls) {
+			const sent = await this.sendRelayPayload(
+				channel,
+				{
+					content: url,
+					...(options.disableMentions ? { allowedMentions: DISABLED_MENTIONS } : {})
+				},
+				// Follow-up unfurls reply to the Components V2 bubble when one was sent.
+				parentRelayMessageId
+			);
+			deliveries.push({ ...baseDelivery, relayMessageId: sent.id });
+		}
+
+		return deliveries;
 	}
 
 	private static async buildRelayPayloadFromRelayContent(
@@ -764,16 +955,24 @@ export abstract class TicketChannelService {
 		options: { disableMentions?: boolean } = {},
 		timestamp = new Date()
 	): Promise<MessageCreateOptions> {
+		const nonYoutubePreviews = relay.linkPreviews.filter((preview) => !isYoutubeLinkPreview(preview));
+		const youtubeUrls = collectYoutubeWatchUrls({
+			text: relay.text,
+			linkPreviews: relay.linkPreviews
+		});
+		const displayText = buildRelayTextWithYoutubeMarkdown(relay.text, youtubeUrls);
 		const fallbackText =
-			relay.media.length > 0 || relay.linkPreviews.length > 0 ? '' : '(no message content)';
+			relay.media.length > 0 || nonYoutubePreviews.length > 0 || youtubeUrls.length > 0
+				? ''
+				: '(no message content)';
 		return this.buildRelayPayload(
-			relay.text || fallbackText,
+			displayText || fallbackText,
 			author,
 			options,
 			timestamp,
 			relay.media,
 			relay.isForwarded,
-			relay.linkPreviews
+			nonYoutubePreviews
 		);
 	}
 
@@ -787,14 +986,15 @@ export abstract class TicketChannelService {
 		linkPreviews?: RelayContent['linkPreviews'],
 		deleted = false
 	): Promise<MessageCreateOptions> {
+		const { media: relayMedia, files } = await materializeRelayMediaForDiscord(media);
 		const hasRenderableContent = Boolean(
-			content.trim() || media?.length || linkPreviews?.length
+			content.trim() || relayMedia?.length || linkPreviews?.length
 		);
 		const components = await RelayMessage.render({
 			author,
 			message: content.trim() || (hasRenderableContent ? '' : '(no message content)'),
 			timestamp: time(timestamp, 'f'),
-			media,
+			media: relayMedia,
 			linkPreviews,
 			forwarded,
 			deleted
@@ -803,6 +1003,7 @@ export abstract class TicketChannelService {
 		return {
 			components,
 			flags: MessageFlags.IsComponentsV2,
+			...(files?.length ? { files } : {}),
 			...(options.disableMentions ? { allowedMentions: DISABLED_MENTIONS } : {})
 		};
 	}
@@ -1003,9 +1204,8 @@ export abstract class TicketChannelService {
 	}
 
 	/**
-	 * Pings staff in the newly created ticket channel/post.
-	 * "All" presence → role mentions (no member fetch).
-	 * Specific statuses → individual mentions for matching online members.
+	 * Pings configured staff roles in the newly created ticket channel/post.
+	 * Presence-filtered user pings are temporarily disabled (no Presence Intent).
 	 */
 	private static async notifyStaffOnNewTicket(
 		guild: Guild,
@@ -1019,60 +1219,18 @@ export abstract class TicketChannelService {
 			const roleIds = (settings.notifyOnNewThreadRoleIds ?? []).filter(Boolean);
 			if (roleIds.length === 0) return;
 
-			const presenceFilter = settings.notifyOnNewThreadPresence ?? [NotifyOnNewThreadPresence.All];
-			const allowAll = presenceFilter.includes(NotifyOnNewThreadPresence.All);
-			const allowedStatuses = new Set<string>(
-				allowAll
-					? []
-					: presenceFilter.filter((status) => status !== NotifyOnNewThreadPresence.All)
-			);
-
 			const channel = await guild.channels.fetch(channelId).catch(() => null);
 			if (!channel?.isTextBased() || !channel.isSendable()) return;
 
-			// All statuses: ping the roles themselves — faster and avoids mentioning everyone by user.
-			if (allowAll) {
-				const chunks = chunkRoleMentions(roleIds, 40, 1800);
-				for (const chunk of chunks) {
-					await channel
-						.send({
-							content: chunk.map((id) => `<@&${id}>`).join(' '),
-							allowedMentions: { roles: chunk, parse: [] }
-						})
-						.catch((error) => {
-							container.logger.warn(`Failed to send new-ticket role notify in ${channelId}`, error);
-						});
-				}
-				return;
-			}
-
-			await guild.members.fetch().catch((error) => {
-				container.logger.warn('Failed to fetch guild members for new-ticket notify', error);
-			});
-
-			const userIds = new Set<string>();
-			for (const member of guild.members.cache.values()) {
-				if (member.user.bot) continue;
-				if (!roleIds.some((roleId) => member.roles.cache.has(roleId))) continue;
-
-				const status = member.presence?.status;
-				if (!status || status === 'offline' || status === 'invisible') continue;
-				if (!allowedStatuses.has(status)) continue;
-
-				userIds.add(member.id);
-			}
-
-			if (userIds.size === 0) return;
-
-			const chunks = chunkIds([...userIds], 40, 1800);
+			const chunks = chunkRoleMentions(roleIds, 40, 1800);
 			for (const chunk of chunks) {
 				await channel
 					.send({
-						content: chunk.map((id) => `<@${id}>`).join(' '),
-						allowedMentions: { users: chunk, parse: [] }
+						content: chunk.map((id) => `<@&${id}>`).join(' '),
+						allowedMentions: { roles: chunk, parse: [] }
 					})
 					.catch((error) => {
-						container.logger.warn(`Failed to send new-ticket notify in ${channelId}`, error);
+						container.logger.warn(`Failed to send new-ticket role notify in ${channelId}`, error);
 					});
 			}
 		} catch (error) {
@@ -1081,13 +1239,13 @@ export abstract class TicketChannelService {
 	}
 }
 
-function chunkIds(ids: string[], maxItems: number, maxChars: number, mentionOverhead = 3) {
+function chunkRoleMentions(ids: string[], maxItems: number, maxChars: number) {
 	const chunks: string[][] = [];
 	let current: string[] = [];
 	let currentLength = 0;
 
 	for (const id of ids) {
-		const mentionLength = id.length + mentionOverhead; // <@id> or <@&id>
+		const mentionLength = id.length + 4; // <@&id>
 		const nextLength = currentLength + mentionLength + (current.length > 0 ? 1 : 0);
 		if (current.length >= maxItems || (current.length > 0 && nextLength > maxChars)) {
 			chunks.push(current);
@@ -1100,10 +1258,6 @@ function chunkIds(ids: string[], maxItems: number, maxChars: number, mentionOver
 
 	if (current.length > 0) chunks.push(current);
 	return chunks;
-}
-
-function chunkRoleMentions(ids: string[], maxItems: number, maxChars: number) {
-	return chunkIds(ids, maxItems, maxChars, 4); // <@&id>
 }
 
 function formatRoleMentions(member: GuildMember) {
