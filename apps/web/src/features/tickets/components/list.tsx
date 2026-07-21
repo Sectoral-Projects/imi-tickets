@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthGate, useProductAccessRedirect } from "@/lib/use-auth-gate";
 import { useRealtime } from "@/lib/use-realtime";
 import { useClientPreferences } from "@/features/settings/hooks/settings";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { TicketListSkeleton } from "./ticket-list-skeleton";
 import { AuthorHoverCard } from "./author-hover-card";
 import { ticketStatusBadgeVariant } from "../utils/status-badge";
@@ -41,7 +42,7 @@ export function TicketList() {
   const { data: preferences } = useClientPreferences(Boolean(session.data));
   const useChannelNameForTranscript = Boolean(preferences?.useChannelNameForTranscript);
   const [searchInput, setSearchInput] = useState("");
-  const search = searchInput;
+  const search = useDebouncedValue(searchInput, 300);
   const [status, setStatus] = useState<TicketStatusFilter>("all");
   const statusFilter = status === "all" ? null : status;
 
@@ -53,6 +54,9 @@ export function TicketList() {
     isLoading,
     error,
   } = useTickets(search, statusFilter);
+
+  // Initial load only — keep the search bar mounted while filter queries refetch.
+  const showInitialSkeleton = isLoading && !data;
 
   const scrollViewportRef = useRef<HTMLDivElement>(null);
 
@@ -140,7 +144,7 @@ export function TicketList() {
     return <TicketListSkeleton />;
   }
 
-  if (isLoading && !data) {
+  if (showInitialSkeleton) {
     return <TicketListSkeleton />;
   }
 
@@ -171,7 +175,7 @@ export function TicketList() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search tickets..."
+            placeholder="Search titles, people, or messages..."
           />
           <Select
             value={status}

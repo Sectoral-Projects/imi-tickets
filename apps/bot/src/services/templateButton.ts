@@ -1,10 +1,5 @@
 import { componentsToTranscriptText } from '@/lib/components/util/transcriptText';
 import {
-	formatModalResponseTranscript,
-	resolveTranscriptUserLabel,
-	TRANSCRIPT_SYSTEM_AUTHOR_ID
-} from '@/lib/transcript/systemMessage';
-import {
 	buildEmbeddedMessageButtonCustomId,
 	parseEmbeddedMessageButtonCustomId
 } from '@/lib/buttonActions/customIds';
@@ -35,8 +30,6 @@ export {
 } from '@/lib/buttonActions/customIds';
 
 export type ForwardToStaffOptions = {
-	/** When true, transcript row is attributed to System with "Answered by …". */
-	modalResponse?: boolean;
 	executedBy?: string;
 };
 
@@ -123,20 +116,18 @@ export abstract class TemplateButtonService {
 		if (!body) return;
 
 		const executedBy = options.executedBy ?? user.id;
-		const modalResponse = options.modalResponse ?? false;
-		const content = modalResponse
-			? formatModalResponseTranscript(resolveTranscriptUserLabel(user), body)
-			: body;
+		const snapshot = MemberSnapshotService.capture(user);
 
-		const snapshot = modalResponse ? undefined : MemberSnapshotService.capture(user);
-
+		// Attribute as the member (DM). channelId stays the staff channel where Discord
+		// stored the copy so relay/delete sync still finds the physical message; the
+		// web transcript badge treats member authors as DM even on the staff channel.
 		MessageService.create({
 			threadId: thread.id,
 			channelId: staffChannelId,
-			authorId: modalResponse ? TRANSCRIPT_SYSTEM_AUTHOR_ID : user.id,
+			authorId: user.id,
 			messageId: sentMessage.id,
 			memberSnapshotId: snapshot?.id,
-			content,
+			content: body,
 			executedBy
 		});
 	}
@@ -163,7 +154,6 @@ export abstract class TemplateButtonService {
 				threadId: options.threadId,
 				presserUserId: options.presserUserId,
 				skipChannelId,
-				modalResponse: options.modalResponse,
 				executedBy: options.executedBy
 			});
 		}
@@ -177,7 +167,6 @@ export abstract class TemplateButtonService {
 			threadId: number;
 			presserUserId: string;
 			skipChannelId?: string | null;
-			modalResponse?: boolean;
 			executedBy?: string;
 		}
 	) {
@@ -190,11 +179,7 @@ export abstract class TemplateButtonService {
 		);
 
 		const executedBy = options.executedBy ?? user.id;
-		const modalResponse = options.modalResponse ?? false;
-		const content = modalResponse
-			? formatModalResponseTranscript(resolveTranscriptUserLabel(user), body)
-			: body;
-		const snapshot = modalResponse ? undefined : MemberSnapshotService.capture(user);
+		const snapshot = MemberSnapshotService.capture(user);
 
 		for (const participant of participants) {
 			const dmChannel = await TicketChannelService.resolveParticipantDmChannel(
@@ -226,10 +211,10 @@ export abstract class TemplateButtonService {
 			MessageService.create({
 				threadId: options.threadId,
 				channelId: dmChannel.id,
-				authorId: modalResponse ? TRANSCRIPT_SYSTEM_AUTHOR_ID : user.id,
+				authorId: user.id,
 				messageId: sentMessage.id,
 				memberSnapshotId: snapshot?.id,
-				content,
+				content: body,
 				executedBy
 			});
 		}

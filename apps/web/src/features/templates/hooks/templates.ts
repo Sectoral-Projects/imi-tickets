@@ -32,7 +32,10 @@ export function useUpdateTemplate() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof updateTemplate>[1] }) =>
       updateTemplate(id, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["templates"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["templates"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
   });
 }
 
@@ -72,6 +75,9 @@ export function useReplaceChannelOpenButtons() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (buttons: ChannelOpenButtonDraft[]) => replaceChannelOpenButtons(buttons),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["channel-open-buttons"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["channel-open-buttons"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
   });
 }

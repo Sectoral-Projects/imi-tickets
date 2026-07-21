@@ -48,9 +48,12 @@ import {
   filterModalTemplates,
   isModalTemplate,
 } from "../utils/template-variables";
+import { toTemplateSelectOptions } from "../utils/template-select-options";
 import { ComponentBuilder } from "./component-builder";
 import { ModalBuilder } from "./modal-builder";
 import { CreateTemplateDialog } from "./create-template-dialog";
+import { ChannelPanelPublishCta } from "./channel-panel-publish-cta";
+import type { SettingsResponse } from "@/features/settings/schemas/settings";
 
 export function TemplatesSettingsSection({
   canManage,
@@ -64,6 +67,8 @@ export function TemplatesSettingsSection({
   onTicketOpenButtonModeChange,
   forwardTemplateButtonsToStaff,
   onForwardTemplateButtonsToStaffChange,
+  channelPanel,
+  onChannelPanelChange,
 }: {
   canManage: boolean;
   selectedId: string;
@@ -76,6 +81,8 @@ export function TemplatesSettingsSection({
   onTicketOpenButtonModeChange: (mode: TicketOpenButtonMode) => void;
   forwardTemplateButtonsToStaff: boolean;
   onForwardTemplateButtonsToStaffChange: (enabled: boolean) => void;
+  channelPanel: SettingsResponse["channelPanel"];
+  onChannelPanelChange: (next: SettingsResponse["channelPanel"]) => void;
 }) {
   const templatesQuery = useTemplates();
   const deleteTemplate = useDeleteTemplate();
@@ -104,14 +111,7 @@ export function TemplatesSettingsSection({
   );
 
   const templateSelectOptions = useMemo(
-    () =>
-      templates.map((template) => ({
-        value: template.id,
-        label: isModalTemplate(template)
-          ? `${template.name} (Modal)`
-          : template.name,
-        keywords: template.id,
-      })),
+    () => toTemplateSelectOptions(templates),
     [templates],
   );
 
@@ -275,6 +275,21 @@ export function TemplatesSettingsSection({
                     </p>
                   ) : null}
                 </div>
+              ) : null}
+
+              {isChannelTicketPanel ? (
+                channelPanel.messageId ? (
+                  <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                    Linked Discord message updates automatically when you save this
+                    template. Message ID: {channelPanel.messageId}
+                  </p>
+                ) : (
+                  <ChannelPanelPublishCta
+                    value={channelPanel}
+                    disabled={!canManage}
+                    onChange={onChannelPanelChange}
+                  />
+                )
               ) : null}
 
               {selectedTemplate.kind === "custom" && !isModal ? (

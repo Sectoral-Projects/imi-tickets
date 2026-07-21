@@ -15,6 +15,8 @@ export interface ChannelPanelConfig {
 	forumThreadId: string | null;
 	messageId: string | null;
 	forumPostTitle: string | null;
+	/** Delete + send a fresh message on update instead of editing (no Discord "(edited)" label). */
+	repostOnUpdate: boolean;
 }
 
 export interface ChannelPanelPublishResult {
@@ -31,7 +33,8 @@ export abstract class ChannelPanelService {
 			channelId: row?.channelPanelChannelId ?? null,
 			forumThreadId: row?.channelPanelForumThreadId ?? null,
 			messageId: row?.channelPanelMessageId ?? null,
-			forumPostTitle: row?.channelPanelForumPostTitle ?? null
+			forumPostTitle: row?.channelPanelForumPostTitle ?? null,
+			repostOnUpdate: row?.channelPanelRepostOnUpdate ?? false
 		};
 	}
 
@@ -42,6 +45,7 @@ export abstract class ChannelPanelService {
 			forumThreadId: string | null;
 			messageId: string | null;
 			forumPostTitle: string | null;
+			repostOnUpdate: boolean;
 		}>,
 		db: DbClient = container.sqlite
 	) {
@@ -60,6 +64,10 @@ export abstract class ChannelPanelService {
 				patch.forumPostTitle === undefined
 					? row.channelPanelForumPostTitle
 					: normalizeForumPostTitle(patch.forumPostTitle),
+			channelPanelRepostOnUpdate:
+				patch.repostOnUpdate === undefined
+					? row.channelPanelRepostOnUpdate
+					: patch.repostOnUpdate,
 			updatedAt: new Date()
 		};
 
@@ -94,24 +102,28 @@ export abstract class ChannelPanelService {
 		const target = await this.resolvePublishTarget(panelConfig, components, db);
 
 		if (panelConfig.messageId) {
-			const edited = await DiscordChannelService.editComponents(
-				target.channelId,
-				panelConfig.messageId,
-				components
-			);
-			if (edited) {
-				this.updateConfig(
-					{
+			if (panelConfig.repostOnUpdate) {
+				await DiscordChannelService.deleteMessage(target.channelId, panelConfig.messageId);
+			} else {
+				const edited = await DiscordChannelService.editComponents(
+					target.channelId,
+					panelConfig.messageId,
+					components
+				);
+				if (edited) {
+					this.updateConfig(
+						{
+							messageId: edited.id,
+							forumThreadId: target.forumThreadId
+						},
+						db
+					);
+					return {
+						channelId: target.channelId,
 						messageId: edited.id,
 						forumThreadId: target.forumThreadId
-					},
-					db
-				);
-				return {
-					channelId: target.channelId,
-					messageId: edited.id,
-					forumThreadId: target.forumThreadId
-				};
+					};
+				}
 			}
 		}
 
@@ -133,6 +145,18 @@ export abstract class ChannelPanelService {
 			messageId: sent.id,
 			forumThreadId: target.forumThreadId
 		};
+	}
+
+	/**
+	 * When a Discord panel message is already linked, re-render and sync it
+	 * (edit in place, or delete+repost when `repostOnUpdate` is on). No-op when unpublished.
+	 */
+	static async syncPublishedMessageIfLinked(
+		db: DbClient = container.sqlite
+	): Promise<ChannelPanelPublishResult | null> {
+		const panelConfig = this.getConfig(db);
+		if (!panelConfig.messageId || !panelConfig.channelId) return null;
+		return this.publish(db);
 	}
 
 	private static async resolvePublishTarget(

@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  GripVertical,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +50,7 @@ export function ModalBuilder({
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
 
   const updateField = (index: number, patch: Partial<ModalBuilderField>) => {
     onChange({
@@ -77,6 +86,23 @@ export function ModalBuilder({
     setDropIndex(null);
   };
 
+  const toggleCollapsed = (fieldKey: string) => {
+    setCollapsedIds((current) => {
+      const next = new Set(current);
+      if (next.has(fieldKey)) next.delete(fieldKey);
+      else next.add(fieldKey);
+      return next;
+    });
+  };
+
+  const collapseAll = () => {
+    setCollapsedIds(new Set(value.fields.map((field) => field.clientKey)));
+  };
+
+  const expandAll = () => {
+    setCollapsedIds(new Set());
+  };
+
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
       <div className="flex flex-col gap-3">
@@ -92,6 +118,30 @@ export function ModalBuilder({
         </div>
 
         <div className="flex flex-col gap-3">
+          {value.fields.length > 1 ? (
+            <div className="flex items-center justify-end gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Expand all fields"
+                title="Expand all"
+                onClick={expandAll}
+              >
+                <ChevronsUpDown className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Collapse all fields"
+                title="Collapse all"
+                onClick={collapseAll}
+              >
+                <ChevronsDownUp className="size-4" />
+              </Button>
+            </div>
+          ) : null}
           {value.fields.map((field, index) => (
             <div
               key={field.clientKey}
@@ -117,7 +167,7 @@ export function ModalBuilder({
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
                   <button
                     type="button"
                     draggable={!disabled}
@@ -129,7 +179,7 @@ export function ModalBuilder({
                     }}
                     onDragEnd={finishDrag}
                     className={cn(
-                      "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                      "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
                       disabled
                         ? "cursor-not-allowed opacity-50"
                         : "cursor-grab hover:bg-muted active:cursor-grabbing",
@@ -137,7 +187,31 @@ export function ModalBuilder({
                   >
                     <GripVertical className="size-4" />
                   </button>
-                  <span className="text-xs font-medium">Field {index + 1}</span>
+                  <button
+                    type="button"
+                    aria-expanded={!collapsedIds.has(field.clientKey)}
+                    aria-label={
+                      collapsedIds.has(field.clientKey)
+                        ? `Expand field ${index + 1}`
+                        : `Collapse field ${index + 1}`
+                    }
+                    onClick={() => toggleCollapsed(field.clientKey)}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {collapsedIds.has(field.clientKey) ? (
+                      <ChevronRight className="size-4" />
+                    ) : (
+                      <ChevronDown className="size-4" />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-medium">Field {index + 1}</span>
+                    {collapsedIds.has(field.clientKey) ? (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {field.label.trim() || field.id.trim() || "Untitled field"}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 {!disabled && value.fields.length > 1 ? (
                   <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeField(index)}>
@@ -147,6 +221,8 @@ export function ModalBuilder({
                 ) : null}
               </div>
 
+              {collapsedIds.has(field.clientKey) ? null : (
+              <>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="flex flex-col gap-2">
                   <Label>Field ID</Label>
@@ -361,6 +437,8 @@ export function ModalBuilder({
                   ) : null}
                 </div>
               ) : null}
+              </>
+              )}
             </div>
           ))}
         </div>

@@ -10,8 +10,8 @@ import {
 
 type MessageGroupCardProps = {
   messages: EnrichedMessage[];
-  ticket: Pick<Ticket, "dmChannelId" | "channelId"> & {
-    participants?: Pick<ThreadParticipant, "dmChannelId">[];
+  ticket: Pick<Ticket, "dmChannelId" | "channelId" | "userId"> & {
+    participants?: Pick<ThreadParticipant, "dmChannelId" | "userId" | "role">[];
   };
   highlightedMessageIds: ReadonlySet<number>;
   replyJumpFlashMessageId: number | null;

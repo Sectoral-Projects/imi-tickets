@@ -1,7 +1,7 @@
 import { requireSetupOwner } from '@/lib/api/guards';
 import { Route } from '@/lib/api/route';
 import { DiscordSetupService } from '@/services/discordSetup';
-import { SetupService, type LinkedGuildInput } from '@/services/setup';
+import { SetupService } from '@/services/setup';
 import { Context, Hono } from 'hono';
 import { BlankInput } from 'hono/types';
 import type { ApiEnv } from '@/lib/api/context';
@@ -51,21 +51,19 @@ export default class SetupGuilds extends Route {
 			return c.json({ error: 'Discord guild access needs to be reauthorized', code: 'DISCORD_GUILDS_REAUTH_REQUIRED' }, 403);
 		}
 
-		const selectedIds = [body.primaryGuildId, ...(body.additionalGuildIds ?? [])];
-		const uniqueSelectedIds = [...new Set(selectedIds)];
-		const allowedGuilds = availableGuilds.guilds.filter((guild) => uniqueSelectedIds.includes(guild.id));
-
-		if (allowedGuilds.length !== uniqueSelectedIds.length) {
-			return c.json({ error: 'One or more selected guilds are not available to this user' }, 400);
+		const primary = availableGuilds.guilds.find((guild) => guild.id === body.primaryGuildId);
+		if (!primary) {
+			return c.json({ error: 'The selected primary guild is not available to this user' }, 400);
 		}
 
-		const linkedGuilds: LinkedGuildInput[] = allowedGuilds.map((guild) => ({
-			guildId: guild.id,
-			name: guild.name,
-			isPrimary: guild.id === body.primaryGuildId
-		}));
-
-		SetupService.replaceLinkedGuilds(c.get('user')!.id, linkedGuilds);
+		// Only the primary guild is linked for setup. Other servers are inferred from bot presence.
+		SetupService.replaceLinkedGuilds(c.get('user')!.id, [
+			{
+				guildId: primary.id,
+				name: primary.name,
+				isPrimary: true
+			}
+		]);
 
 		return c.json(SetupService.getStatus(c.get('user')!.id));
 	}

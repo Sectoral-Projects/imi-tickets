@@ -1,9 +1,12 @@
 import { Protected } from '@/lib/api/guards';
 import { Route } from '@/lib/api/route';
+import { ChannelPanelService } from '@/services/channelPanel';
 import { MessageTemplateService, type UpdateMessageTemplateInput } from '@/services/messageTemplate';
 import { Context, Hono } from 'hono';
 import { BlankInput } from 'hono/types';
 import type { ApiEnv } from '@/lib/api/context';
+
+const TICKET_CHANNEL_PANEL_ID = 'ticket-channel-panel';
 
 export default class TemplateById extends Route {
 	register(app: Hono<ApiEnv>, path: string) {
@@ -30,7 +33,27 @@ export default class TemplateById extends Route {
 		try {
 			const id = c.req.param('id');
 			if (!id) return c.json({ error: 'Template id is required' }, 400);
-			return c.json(MessageTemplateService.update(c.get('user')!.id, id, body));
+			const template = MessageTemplateService.update(c.get('user')!.id, id, body);
+
+			if (id === TICKET_CHANNEL_PANEL_ID) {
+				try {
+					await ChannelPanelService.syncPublishedMessageIfLinked();
+				} catch (syncError) {
+					return c.json(
+						{
+							error:
+								syncError instanceof Error
+									? `Template saved, but Discord panel update failed: ${syncError.message}`
+									: 'Template saved, but Discord panel update failed.',
+							code: 'CHANNEL_PANEL_SYNC_FAILED',
+							template
+						},
+						502
+					);
+				}
+			}
+
+			return c.json(template);
 		} catch (error) {
 			return c.json({ error: error instanceof Error ? error.message : 'Failed to update template' }, 400);
 		}

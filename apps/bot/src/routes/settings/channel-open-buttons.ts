@@ -5,6 +5,7 @@ import {
 	type ChannelOpenButton,
 	type ChannelOpenButtonInput
 } from '@/services/channelOpenButton';
+import { ChannelPanelService } from '@/services/channelPanel';
 import { Context, Hono } from 'hono';
 import { BlankInput } from 'hono/types';
 import type { ApiEnv } from '@/lib/api/context';
@@ -28,9 +29,23 @@ export default class ChannelOpenButtons extends Route {
 		}
 
 		try {
-			return c.json({
-				buttons: ChannelOpenButtonService.replaceAll(body.buttons).map(toButtonView)
-			});
+			const buttons = ChannelOpenButtonService.replaceAll(body.buttons).map(toButtonView);
+			try {
+				await ChannelPanelService.syncPublishedMessageIfLinked();
+			} catch (syncError) {
+				return c.json(
+					{
+						error:
+							syncError instanceof Error
+								? `Buttons saved, but Discord panel update failed: ${syncError.message}`
+								: 'Buttons saved, but Discord panel update failed.',
+						code: 'CHANNEL_PANEL_SYNC_FAILED',
+						buttons
+					},
+					502
+				);
+			}
+			return c.json({ buttons });
 		} catch (error) {
 			return c.json(
 				{ error: error instanceof Error ? error.message : 'Failed to update buttons' },

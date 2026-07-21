@@ -547,8 +547,7 @@ export class InteractionCreateListener extends Listener {
 			interaction.user,
 			modalVars,
 			settings,
-			openResult.staffChannelId,
-			true
+			openResult.staffChannelId
 		);
 	}
 
@@ -603,9 +602,7 @@ export class InteractionCreateListener extends Listener {
 			return;
 		}
 
-		await completeChannelPanelTicketOpen(interaction, interaction.user, button, modalVars, {
-			modalResponse: true
-		});
+		await completeChannelPanelTicketOpen(interaction, interaction.user, button, modalVars);
 	}
 
 	private async handleEmbeddedModalSubmit(
@@ -642,7 +639,6 @@ export class InteractionCreateListener extends Listener {
 			modalVars,
 			SettingsService.getAppSettings(),
 			thread?.channelId,
-			true,
 			{
 				messageDelivery: action.messageDelivery,
 				threadId: thread?.id ?? null,
@@ -738,7 +734,6 @@ export class InteractionCreateListener extends Listener {
 		extraVars: Record<string, unknown>,
 		settings: ReturnType<typeof SettingsService.getAppSettings>,
 		staffChannelId?: string | null,
-		modalResponse = false,
 		embeddedDelivery?: {
 			messageDelivery?: ButtonMessageDelivery | null;
 			threadId?: number | null;
@@ -761,12 +756,10 @@ export class InteractionCreateListener extends Listener {
 						threadId: embeddedDelivery.threadId,
 						staffChannelId,
 						skipChannelId: embeddedDelivery.skipChannelId ?? interaction.channelId,
-						modalResponse,
 						executedBy: user.id
 					});
 				} else if (settings.forwardTemplateButtonsToStaff !== false && staffChannelId) {
 					await TemplateButtonService.forwardToStaff(staffChannelId, templateId, user, extraVars, {
-						modalResponse,
 						executedBy: user.id
 					});
 				}

@@ -120,18 +120,40 @@ export abstract class SetupService {
 		if (!primaryGuild) throw new Error('A primary guild is required');
 
 		const now = new Date();
+		const nextGuildIds = new Set(guilds.map((guild) => guild.guildId));
 
 		db.transaction((tx) => {
+			const previousGuilds = tx.select().from(linkedGuilds).all();
+			const previousById = new Map(previousGuilds.map((guild) => [guild.guildId, guild]));
+			const previousRolePermissions = tx.select().from(guildStaffRolePermissions).all();
+
 			tx.delete(guildStaffRolePermissions).run();
 			tx.delete(linkedGuilds).run();
 
 			for (const guild of guilds) {
+				const previous = previousById.get(guild.guildId);
 				tx.insert(linkedGuilds)
 					.values({
 						guildId: guild.guildId,
 						name: guild.name,
 						isPrimary: guild.isPrimary,
-						createdAt: now,
+						channelStrategy: previous?.channelStrategy ?? null,
+						categoryChannelId: previous?.categoryChannelId ?? null,
+						forumChannelId: previous?.forumChannelId ?? null,
+						createdAt: previous?.createdAt ?? now,
+						updatedAt: now
+					})
+					.run();
+			}
+
+			for (const role of previousRolePermissions) {
+				if (!nextGuildIds.has(role.guildId)) continue;
+				tx.insert(guildStaffRolePermissions)
+					.values({
+						guildId: role.guildId,
+						roleId: role.roleId,
+						permissions: role.permissions,
+						createdAt: role.createdAt,
 						updatedAt: now
 					})
 					.run();
@@ -291,23 +313,23 @@ export abstract class SetupService {
 
 	private static getMissingRequirements(guilds: LinkedGuildStatus[]) {
 		const missing: string[] = [];
+		const primary = guilds.find((guild) => guild.isPrimary);
 
-		if (!guilds.some((guild) => guild.isPrimary)) {
+		if (!primary) {
 			missing.push('primary_guild');
+			return missing;
 		}
 
-		for (const guild of guilds) {
-			if (guild.channelStrategy === ChannelStrategy.Category && !guild.categoryChannelId) {
-				missing.push(`${guild.guildId}:category_channel`);
-			} else if (guild.channelStrategy === ChannelStrategy.Forum && !guild.forumChannelId) {
-				missing.push(`${guild.guildId}:forum_channel`);
-			} else if (!guild.channelStrategy) {
-				missing.push(`${guild.guildId}:channel_strategy`);
-			}
+		if (primary.channelStrategy === ChannelStrategy.Category && !primary.categoryChannelId) {
+			missing.push(`${primary.guildId}:category_channel`);
+		} else if (primary.channelStrategy === ChannelStrategy.Forum && !primary.forumChannelId) {
+			missing.push(`${primary.guildId}:forum_channel`);
+		} else if (!primary.channelStrategy) {
+			missing.push(`${primary.guildId}:channel_strategy`);
+		}
 
-			if (!guild.rolePermissions.some((role) => role.permissions.includes(RbacPermission.Read))) {
-				missing.push(`${guild.guildId}:read_role`);
-			}
+		if (!primary.rolePermissions.some((role) => role.permissions.includes(RbacPermission.Read))) {
+			missing.push(`${primary.guildId}:read_role`);
 		}
 
 		return missing;

@@ -20,6 +20,10 @@ export const config = sqliteTable("config", {
 	channelPanelForumThreadId: text("channel_panel_forum_thread_id"),
 	channelPanelMessageId: text("channel_panel_message_id"),
 	channelPanelForumPostTitle: text("channel_panel_forum_post_title"),
+	/** When true, panel updates delete+repost instead of editing (avoids Discord "(edited)" label). */
+	channelPanelRepostOnUpdate: integer("channel_panel_repost_on_update", { mode: "boolean" })
+		.notNull()
+		.default(false),
 	setupOwnerUserId: text("setup_owner_user_id"),
 	onboardingCompletedAt: integer("onboarding_completed_at", { mode: "timestamp" }),
 	settings: text("settings", { mode: "json" }).$type<{

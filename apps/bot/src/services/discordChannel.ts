@@ -39,6 +39,17 @@ export abstract class DiscordChannelService {
 		});
 	}
 
+	static async deleteMessage(channelId: string, messageId: string) {
+		const channel = await container.client.channels.fetch(channelId).catch(() => null);
+		if (!channel?.isTextBased()) return false;
+
+		const message = await channel.messages.fetch(messageId).catch(() => null);
+		if (!message) return false;
+
+		await message.delete().catch(() => null);
+		return true;
+	}
+
 	static formatTimestamp(date = new Date()) {
 		return time(date, 'f');
 	}

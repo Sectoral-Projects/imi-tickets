@@ -38,6 +38,7 @@ import { normalizeTicketOpenButtonMode } from "@/features/templates/constants";
 import { SettingsPageSkeleton } from "./settings-page-skeleton";
 import { ChannelPanelSettingsSection } from "./channel-panel-settings";
 import { DataPrivacySettingsSection } from "./data-privacy-settings";
+import { ServersSettingsSection } from "./servers-settings";
 import { WhitelabelSettingsSection } from "./whitelabel-settings";
 import {
   StaffRoleAliasesEditor,
@@ -138,6 +139,7 @@ export function SettingsContent() {
         forumThreadId: data.channelPanel.forumThreadId,
         messageId: data.channelPanel.messageId,
         forumPostTitle: data.channelPanel.forumPostTitle,
+        repostOnUpdate: data.channelPanel.repostOnUpdate,
       },
     };
   }, [data]);
@@ -187,6 +189,7 @@ export function SettingsContent() {
       (draft.channelPanel.channelId ?? "") !== (data.channelPanel.channelId ?? "") ||
       (draft.channelPanel.forumThreadId ?? "") !== (data.channelPanel.forumThreadId ?? "") ||
       (draft.channelPanel.forumPostTitle ?? "") !== (data.channelPanel.forumPostTitle ?? "") ||
+      draft.channelPanel.repostOnUpdate !== data.channelPanel.repostOnUpdate ||
       draft.settings.relayStaffTypingToMember !==
         Boolean(data.settings.relayStaffTypingToMember) ||
       draft.settings.anonymousStaff !== Boolean(data.settings.anonymousStaff) ||
@@ -394,6 +397,7 @@ export function SettingsContent() {
             channelId: draft.channelPanel.channelId,
             forumThreadId: draft.channelPanel.forumThreadId,
             forumPostTitle: draft.channelPanel.forumPostTitle,
+            repostOnUpdate: draft.channelPanel.repostOnUpdate,
           },
         });
         setDraftOverride(null);
@@ -495,7 +499,7 @@ export function SettingsContent() {
         }}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <div className="mx-auto w-full max-w-3xl shrink-0 space-y-4 px-4 pt-4 sm:px-6">
+        <div className="mx-auto w-full max-w-4xl shrink-0 space-y-4 px-4 pt-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
@@ -509,6 +513,9 @@ export function SettingsContent() {
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="templates">Templates</TabsTrigger>
             {data?.canAdmin ? (
+              <TabsTrigger value="servers">Servers</TabsTrigger>
+            ) : null}
+            {data?.canAdmin ? (
               <TabsTrigger value="whitelabel">Whitelabel</TabsTrigger>
             ) : null}
             {data?.canAdmin ? (
@@ -521,7 +528,7 @@ export function SettingsContent() {
           className="min-h-0 flex-1"
           viewportClassName="overscroll-behavior-contain [overflow-anchor:none]"
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-4 sm:px-6">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 pb-4 sm:px-6">
         <TabsContent value="general" className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -902,8 +909,21 @@ export function SettingsContent() {
             onForwardTemplateButtonsToStaffChange={(enabled) =>
               updateSetting("forwardTemplateButtonsToStaff", enabled)
             }
+            channelPanel={draft.channelPanel}
+            onChannelPanelChange={(channelPanel) => {
+              setDraftOverride((current) => ({
+                ...(current ?? draft),
+                channelPanel,
+              }));
+            }}
           />
         </TabsContent>
+
+        {data?.canAdmin ? (
+          <TabsContent value="servers">
+            <ServersSettingsSection disabled={adminOnly} />
+          </TabsContent>
+        ) : null}
 
         {data?.canAdmin ? (
           <TabsContent value="whitelabel">
@@ -922,7 +942,7 @@ export function SettingsContent() {
 
         {(saveError || !readOnly) &&
         (settingsTab === "general" || settingsTab === "templates") ? (
-          <div className="mx-auto w-full max-w-3xl shrink-0 space-y-3 border-t border-border px-4 py-4 sm:px-6">
+          <div className="mx-auto w-full max-w-4xl shrink-0 space-y-3 border-t border-border px-4 py-4 sm:px-6">
             {saveError ? (
               <p className="text-sm text-destructive">{saveError}</p>
             ) : null}

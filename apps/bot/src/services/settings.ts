@@ -70,6 +70,8 @@ export interface ChannelPanelView {
 	forumThreadId: string | null;
 	messageId: string | null;
 	forumPostTitle: string | null;
+	/** Delete + send a fresh message on update instead of editing (no Discord "(edited)" label). */
+	repostOnUpdate: boolean;
 }
 
 export interface UpdateSettingsInput {
@@ -84,6 +86,7 @@ export interface UpdateSettingsInput {
 		channelId: string | null;
 		forumThreadId: string | null;
 		forumPostTitle: string | null;
+		repostOnUpdate: boolean;
 	}>;
 }
 
@@ -141,7 +144,8 @@ export abstract class SettingsService {
 				channelId: row?.channelPanelChannelId ?? null,
 				forumThreadId: row?.channelPanelForumThreadId ?? null,
 				messageId: row?.channelPanelMessageId ?? null,
-				forumPostTitle: row?.channelPanelForumPostTitle ?? null
+				forumPostTitle: row?.channelPanelForumPostTitle ?? null,
+				repostOnUpdate: row?.channelPanelRepostOnUpdate ?? false
 			},
 			canManage: manageAccess.allowed,
 			canAdmin: adminAccess.allowed
@@ -192,6 +196,10 @@ export abstract class SettingsService {
 					input.channelPanel?.forumPostTitle === undefined
 						? current.channelPanelForumPostTitle
 						: normalizeForumPostTitle(input.channelPanel.forumPostTitle),
+				channelPanelRepostOnUpdate:
+					input.channelPanel?.repostOnUpdate === undefined
+						? current.channelPanelRepostOnUpdate
+						: input.channelPanel.repostOnUpdate,
 				updatedAt: now
 			};
 
@@ -210,7 +218,8 @@ export abstract class SettingsService {
 							enabled: values.channelPanelEnabled,
 							channelId: values.channelPanelChannelId,
 							forumThreadId: values.channelPanelForumThreadId,
-							forumPostTitle: values.channelPanelForumPostTitle
+							forumPostTitle: values.channelPanelForumPostTitle,
+							repostOnUpdate: values.channelPanelRepostOnUpdate
 						}
 					}
 				},
@@ -226,7 +235,8 @@ export abstract class SettingsService {
 					channelId: values.channelPanelChannelId ?? null,
 					forumThreadId: values.channelPanelForumThreadId ?? null,
 					messageId: current.channelPanelMessageId ?? null,
-					forumPostTitle: values.channelPanelForumPostTitle ?? null
+					forumPostTitle: values.channelPanelForumPostTitle ?? null,
+					repostOnUpdate: values.channelPanelRepostOnUpdate ?? false
 				}
 			};
 		});

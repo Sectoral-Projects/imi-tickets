@@ -10,7 +10,6 @@ import { OnboardingShell } from "./onboarding-shell";
 import { StepSidebar } from "./step-progress";
 import {
   ChannelPicker,
-  GuildMultiPicker,
   GuildPicker,
   StaffRolePermissionsEditor,
   staffLevelToPermissions,
@@ -40,7 +39,6 @@ import { cn } from "@/lib/utils";
 const steps = [
   "Account",
   "Primary server",
-  "More servers",
   "Bot invite",
   "Routing",
   "Staff roles",
@@ -65,19 +63,9 @@ export function OnboardingFlow() {
   const availableGuilds = setupGuilds.data?.guilds ?? [];
   const needsReauth = Boolean(setupGuilds.data?.needsReauth);
   const savedPrimaryGuildId = setupData?.primaryGuildId ?? "";
-  const linkedAdditionalGuildIds = useMemo(
-    () => linkedAdditionalGuildSet(linkedGuilds),
-    [linkedGuilds],
-  );
-  const linkedAdditionalGuildKey = useMemo(
-    () => serializeGuildIdSet(linkedAdditionalGuildIds),
-    [linkedAdditionalGuildIds],
-  );
 
   const [primaryGuildDraft, setPrimaryGuildDraft] = useState(savedPrimaryGuildId);
   const [primaryDraftSyncKey, setPrimaryDraftSyncKey] = useState(savedPrimaryGuildId);
-  const [additionalGuildDraft, setAdditionalGuildDraft] = useState(linkedAdditionalGuildIds);
-  const [additionalDraftSyncKey, setAdditionalDraftSyncKey] = useState(linkedAdditionalGuildKey);
 
   const routingTargetGuild =
     linkedGuilds.find((guild) => !guild.channelStrategy) ?? linkedGuilds[0] ?? null;
@@ -113,11 +101,6 @@ export function OnboardingFlow() {
   if (primaryDraftSyncKey !== savedPrimaryGuildId) {
     setPrimaryDraftSyncKey(savedPrimaryGuildId);
     setPrimaryGuildDraft(savedPrimaryGuildId);
-  }
-
-  if (additionalDraftSyncKey !== linkedAdditionalGuildKey) {
-    setAdditionalDraftSyncKey(linkedAdditionalGuildKey);
-    setAdditionalGuildDraft(linkedAdditionalGuildIds);
   }
 
   if (routingDraftSyncKey !== routingTargetGuildId) {
@@ -217,36 +200,15 @@ export function OnboardingFlow() {
 
     try {
       if (currentStep === 1) {
-        if (
-          shouldSavePrimaryGuildSelection(
-            status!,
-            linkedGuilds,
-            primaryGuildDraft,
-            additionalGuildDraft,
-          )
-        ) {
+        if (shouldSavePrimaryGuildSelection(status!, primaryGuildDraft)) {
           await saveGuilds.mutateAsync({
             primaryGuildId: primaryGuildDraft,
-            additionalGuildIds: [...additionalGuildDraft].filter(
-              (guildId) => guildId !== primaryGuildDraft,
-            ),
+            additionalGuildIds: [],
           });
         }
       }
 
-      if (currentStep === 2) {
-        const primaryGuildId = status!.primaryGuildId;
-        if (!primaryGuildId) return;
-
-        if (hasAdditionalGuildDraftChanged(linkedGuilds, additionalGuildDraft)) {
-          await saveGuilds.mutateAsync({
-            primaryGuildId,
-            additionalGuildIds: [...additionalGuildDraft],
-          });
-        }
-      }
-
-      if (currentStep === 4) {
+      if (currentStep === 3) {
         const incompleteGuild = linkedGuilds.find((guild) => !guild.channelStrategy);
 
         if (incompleteGuild) {
@@ -268,7 +230,7 @@ export function OnboardingFlow() {
         }
       }
 
-      if (currentStep === 5) {
+      if (currentStep === 4) {
         const incompleteGuild = linkedGuilds.find((guild) =>
           !guild.rolePermissions.some((role) => role.permissions.includes("READ")),
         );
@@ -362,18 +324,8 @@ export function OnboardingFlow() {
           saveError={saveGuilds.error}
         />
       )}
-      {currentStep === 2 && (
-        <AdditionalGuildsStep
-          guilds={availableGuilds}
-          primaryGuildId={status.primaryGuildId}
-          selectedGuildIds={additionalGuildDraft}
-          onSelectedGuildIdsChange={setAdditionalGuildDraft}
-          loading={setupGuilds.isFetching}
-          saveError={saveGuilds.error}
-        />
-      )}
-      {currentStep === 3 && <BotInviteStep guilds={availableGuilds} linkedGuilds={linkedGuilds} />}
-      {currentStep === 4 && (
+      {currentStep === 2 && <BotInviteStep guilds={availableGuilds} linkedGuilds={linkedGuilds} />}
+      {currentStep === 3 && (
         <ChannelStrategyStep
           targetGuild={routingTargetGuild}
           strategy={routingStrategy}
@@ -386,7 +338,7 @@ export function OnboardingFlow() {
           saveError={saveChannelStrategy.error}
         />
       )}
-      {currentStep === 5 && (
+      {currentStep === 4 && (
         <StaffRolesStep
           targetGuild={staffTargetGuild}
           rolePermissions={staffRolePermissions}
@@ -394,7 +346,7 @@ export function OnboardingFlow() {
           saveError={saveRolePermissions.error}
         />
       )}
-      {currentStep === 6 && (
+      {currentStep === 5 && (
         <ReviewStep
           linkedGuilds={linkedGuilds}
           missingRequirements={status.missingRequirements}
@@ -487,55 +439,6 @@ function PrimaryGuildStep({
   );
 }
 
-function AdditionalGuildsStep({
-  guilds,
-  primaryGuildId,
-  selectedGuildIds,
-  onSelectedGuildIdsChange,
-  loading,
-  saveError,
-}: {
-  guilds: DiscordSetupGuild[];
-  primaryGuildId: string | null;
-  selectedGuildIds: Set<string>;
-  onSelectedGuildIdsChange: (guildIds: Set<string>) => void;
-  loading: boolean;
-  saveError: unknown;
-}) {
-  if (!primaryGuildId) {
-    return (
-      <StepContent>
-        <StepHeader title="More servers" description="Choose a primary server first." />
-      </StepContent>
-    );
-  }
-
-  const additionalGuilds = guilds.filter((guild) => guild.id !== primaryGuildId);
-
-  return (
-    <StepContent>
-      <StepHeader
-        title="More servers"
-        description="Optional — add other servers to watch. You can add more later in settings."
-      />
-
-      {loading ? (
-        <p className="text-sm text-muted-foreground">Loading servers…</p>
-      ) : additionalGuilds.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No other administrator servers found.</p>
-      ) : (
-        <GuildMultiPicker
-          guilds={additionalGuilds}
-          selectedGuildIds={selectedGuildIds}
-          onSelectedGuildIdsChange={onSelectedGuildIdsChange}
-        />
-      )}
-
-      <MutationError error={saveError} />
-    </StepContent>
-  );
-}
-
 function BotInviteStep({
   guilds,
   linkedGuilds,
@@ -550,7 +453,7 @@ function BotInviteStep({
     <StepContent>
       <StepHeader
         title="Bot invite"
-        description="The bot needs to be in every linked server before you can finish setup."
+        description="Invite the bot to your primary server before you finish setup."
       />
 
       <div className="divide-y divide-border rounded-lg border border-border">
@@ -859,12 +762,10 @@ function canAdvanceFromStep(step: number, context: NavigationContext) {
     case 1:
       return Boolean(context.primaryGuildDraft) && !context.needsReauth;
     case 2:
-      return Boolean(context.status.primaryGuildId);
-    case 3:
       return allBotsReady(context.linkedGuilds, context.guilds);
-    case 4:
+    case 3:
       return Boolean(context.routingTargetGuildId && context.routingChannelId);
-    case 5:
+    case 4:
       return (
         Boolean(context.staffTargetGuildId) &&
         Object.values(context.staffRolePermissions).some((permissions) =>
@@ -899,7 +800,7 @@ function deriveMaxReachable(
     max = Math.max(max, 5);
   }
   if (status.missingRequirements.length === 0 && linkedGuilds.length > 0) {
-    max = Math.max(max, 6);
+    max = Math.max(max, 5);
   }
 
   return max;
@@ -921,47 +822,10 @@ function buildRolePermissionPayload(
     .map(([roleId, permissions]) => ({ roleId, permissions }));
 }
 
-function linkedAdditionalGuildSet(linkedGuilds: LinkedGuildStatus[]) {
-  return new Set(linkedGuilds.filter((guild) => !guild.isPrimary).map((guild) => guild.guildId));
-}
-
-function serializeGuildIdSet(guildIds: Set<string>) {
-  return [...guildIds].sort().join(",");
-}
-
-function setsEqual(left: Set<string>, right: Set<string>) {
-  if (left.size !== right.size) return false;
-
-  for (const value of left) {
-    if (!right.has(value)) return false;
-  }
-
-  return true;
-}
-
-function shouldSavePrimaryGuildSelection(
-  status: SetupStatus,
-  linkedGuilds: LinkedGuildStatus[],
-  primaryGuildDraft: string,
-  additionalGuildDraft: Set<string>,
-) {
-  if (primaryGuildDraft !== (status.primaryGuildId ?? "")) {
-    return true;
-  }
-
-  const linkedAdditional = linkedAdditionalGuildSet(linkedGuilds);
-  const draftAdditional = new Set(
-    [...additionalGuildDraft].filter((guildId) => guildId !== primaryGuildDraft),
-  );
-
-  return !setsEqual(linkedAdditional, draftAdditional);
-}
-
-function hasAdditionalGuildDraftChanged(
-  linkedGuilds: LinkedGuildStatus[],
-  additionalGuildDraft: Set<string>,
-) {
-  return !setsEqual(linkedAdditionalGuildSet(linkedGuilds), additionalGuildDraft);
+function shouldSavePrimaryGuildSelection(status: SetupStatus, primaryGuildDraft: string) {
+  if (primaryGuildDraft !== (status.primaryGuildId ?? "")) return true;
+  // Drop any legacy non-primary linked guilds.
+  return status.linkedGuilds.some((guild) => !guild.isPrimary);
 }
 
 function getSavedRoutingChannelId(guild: LinkedGuildStatus) {
