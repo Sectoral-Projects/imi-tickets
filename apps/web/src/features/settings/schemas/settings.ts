@@ -46,6 +46,7 @@ export const settingsResponseSchema = z.object({
     forumThreadId: z.string().nullable(),
     messageId: z.string().nullable(),
     forumPostTitle: z.string().nullable(),
+    repostOnUpdate: z.boolean(),
   }),
   canManage: z.boolean(),
   canAdmin: z.boolean(),
@@ -133,6 +134,7 @@ export const updateSettingsSchema = z.object({
       channelId: z.string().nullable().optional(),
       forumThreadId: z.string().nullable().optional(),
       forumPostTitle: z.string().nullable().optional(),
+      repostOnUpdate: z.boolean().optional(),
     })
     .optional(),
 });

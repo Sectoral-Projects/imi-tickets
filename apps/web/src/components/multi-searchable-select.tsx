@@ -18,6 +18,39 @@ const triggerClassName = cn(
   "disabled:cursor-not-allowed disabled:opacity-50",
 );
 
+type OptionGroup = {
+  heading: string | null;
+  options: SearchableSelectOption[];
+};
+
+function groupOptions(options: SearchableSelectOption[]): OptionGroup[] {
+  const ungrouped: SearchableSelectOption[] = [];
+  const byHeading = new Map<string, SearchableSelectOption[]>();
+  const headingOrder: string[] = [];
+
+  for (const option of options) {
+    const heading = option.group?.trim() || null;
+    if (!heading) {
+      ungrouped.push(option);
+      continue;
+    }
+    if (!byHeading.has(heading)) {
+      byHeading.set(heading, []);
+      headingOrder.push(heading);
+    }
+    byHeading.get(heading)!.push(option);
+  }
+
+  const groups: OptionGroup[] = [];
+  if (ungrouped.length > 0) {
+    groups.push({ heading: null, options: ungrouped });
+  }
+  for (const heading of headingOrder) {
+    groups.push({ heading, options: byHeading.get(heading)! });
+  }
+  return groups;
+}
+
 export function MultiSearchableSelect({
   options,
   value,
@@ -44,6 +77,7 @@ export function MultiSearchableSelect({
     const selectedSet = new Set(value);
     return options.filter((option) => selectedSet.has(option.value));
   }, [options, value]);
+  const groups = useMemo(() => groupOptions(options), [options]);
 
   const label =
     selected.length === 0
@@ -79,26 +113,31 @@ export function MultiSearchableSelect({
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
             <CommandEmpty>{emptyText}</CommandEmpty>
-            <CommandGroup>
-              {options.map((option) => {
-                const isSelected = value.includes(option.value);
-                return (
-                  <CommandItem
-                    key={option.value}
-                    value={`${option.label} ${option.keywords ?? option.value}`}
-                    onSelect={() => toggle(option.value)}
-                  >
-                    <Check
-                      className={cn(
-                        "size-4",
-                        isSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <span className="truncate">{option.label}</span>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
+            {groups.map((group) => (
+              <CommandGroup
+                key={group.heading ?? "__ungrouped__"}
+                heading={group.heading ?? undefined}
+              >
+                {group.options.map((option) => {
+                  const isSelected = value.includes(option.value);
+                  return (
+                    <CommandItem
+                      key={option.value}
+                      value={`${option.label} ${option.keywords ?? option.value}`}
+                      onSelect={() => toggle(option.value)}
+                    >
+                      <Check
+                        className={cn(
+                          "size-4",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="truncate">{option.label}</span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            ))}
           </CommandList>
         </Command>
       </PopoverContent>

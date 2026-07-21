@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleHelp,
   GripVertical,
   Plus,
@@ -33,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { previewTemplate } from "../api/templates";
 import type { MessageTemplate } from "../schemas/templates";
 import { buildPreviewVariables } from "../utils/preview-variables";
+import { toTemplateSelectOptions } from "../utils/template-select-options";
 import {
   appendButtonsToPreviewComponents,
   buildTemplateFromBuilder,
@@ -95,22 +99,12 @@ export function ComponentBuilder({
   const embedButtonsInTemplate = !externalOpenButtons;
 
   const linkableTemplateOptions = useMemo(
-    () =>
-      linkableTemplates.map((template) => ({
-        value: template.id,
-        label: template.name,
-        keywords: template.id,
-      })),
+    () => toTemplateSelectOptions(linkableTemplates, { messagesOnly: true }),
     [linkableTemplates],
   );
 
   const modalTemplateOptions = useMemo(
-    () =>
-      modalTemplates.map((template) => ({
-        value: template.id,
-        label: template.name,
-        keywords: template.id,
-      })),
+    () => toTemplateSelectOptions(modalTemplates, { modalsOnly: true }),
     [modalTemplates],
   );
 
@@ -135,6 +129,7 @@ export function ComponentBuilder({
 
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [previewComponents, setPreviewComponents] = useState<unknown | null>(
     null,
   );
@@ -274,6 +269,31 @@ export function ComponentBuilder({
     setDropIndex(null);
   };
 
+  const toggleCollapsed = (itemId: string) => {
+    setCollapsedIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const collapseAll = () => {
+    setCollapsedIds(new Set(value.items.map((item) => item.id)));
+  };
+
+  const expandAll = () => {
+    setCollapsedIds(new Set());
+  };
+
+  const itemSummary = (item: (typeof value.items)[number]) => {
+    if (item.kind === "text") {
+      const text = item.content.replace(/\s+/g, " ").trim();
+      return text || "Empty block";
+    }
+    return item.label.trim() || item.buttonId.trim() || "Untitled button";
+  };
+
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
       <div className="flex flex-col gap-3">
@@ -287,6 +307,30 @@ export function ComponentBuilder({
         </div>
 
         <div className="flex flex-col gap-3">
+          {value.items.length > 1 ? (
+            <div className="flex items-center justify-end gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Expand all blocks and buttons"
+                title="Expand all"
+                onClick={expandAll}
+              >
+                <ChevronsUpDown className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Collapse all blocks and buttons"
+                title="Collapse all"
+                onClick={collapseAll}
+              >
+                <ChevronsDownUp className="size-4" />
+              </Button>
+            </div>
+          ) : null}
           {value.items.map((item, index) => (
             <div
               key={item.id}
@@ -312,7 +356,7 @@ export function ComponentBuilder({
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
                   <button
                     type="button"
                     draggable={!disabled}
@@ -324,7 +368,7 @@ export function ComponentBuilder({
                     }}
                     onDragEnd={finishDrag}
                     className={cn(
-                      "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                      "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
                       disabled
                         ? "cursor-not-allowed opacity-50"
                         : "cursor-grab hover:bg-muted active:cursor-grabbing",
@@ -332,11 +376,35 @@ export function ComponentBuilder({
                   >
                     <GripVertical className="size-4" />
                   </button>
-                  <span className="text-xs font-medium">
-                    {item.kind === "text"
-                      ? `Block ${value.items.slice(0, index + 1).filter((entry) => entry.kind === "text").length}`
-                      : "Button"}
-                  </span>
+                  <button
+                    type="button"
+                    aria-expanded={!collapsedIds.has(item.id)}
+                    aria-label={
+                      collapsedIds.has(item.id)
+                        ? `Expand ${item.kind}`
+                        : `Collapse ${item.kind}`
+                    }
+                    onClick={() => toggleCollapsed(item.id)}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {collapsedIds.has(item.id) ? (
+                      <ChevronRight className="size-4" />
+                    ) : (
+                      <ChevronDown className="size-4" />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-medium">
+                      {item.kind === "text"
+                        ? `Block ${value.items.slice(0, index + 1).filter((entry) => entry.kind === "text").length}`
+                        : "Button"}
+                    </span>
+                    {collapsedIds.has(item.id) ? (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {itemSummary(item)}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 {!disabled && value.items.length > 1 ? (
                   <Button
@@ -351,7 +419,7 @@ export function ComponentBuilder({
                 ) : null}
               </div>
 
-              {item.kind === "text" ? (
+              {collapsedIds.has(item.id) ? null : item.kind === "text" ? (
                 <VariableHighlightTextarea
                   value={item.content}
                   disabled={disabled}

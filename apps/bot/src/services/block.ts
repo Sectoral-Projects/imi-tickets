@@ -118,7 +118,7 @@ export abstract class BlockService {
 		if (roleBlocks.length === 0) return null;
 
 		const roleIds = new Set(roleBlocks.map((entry) => entry.entityId));
-		for (const guildId of linkedGuildIds(db)) {
+		for (const guildId of roleBlockGuildIds(db)) {
 			const member = await fetchGuildMember(guildId, userId);
 			if (!member) continue;
 
@@ -147,8 +147,11 @@ function normalizeReason(reason: string | null | undefined) {
 	return trimmed.length > 0 ? trimmed : null;
 }
 
-function linkedGuildIds(db: DbClient) {
-	const setup = SetupService.getStatus(undefined, db);
+function roleBlockGuildIds(_db: DbClient) {
+	const botGuildIds = [...container.client.guilds.cache.keys()];
+	if (botGuildIds.length > 0) return botGuildIds;
+
+	const setup = SetupService.getStatus(undefined, _db);
 	return setup.linkedGuilds.map((guild) => guild.guildId);
 }
 

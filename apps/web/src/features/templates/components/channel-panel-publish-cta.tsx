@@ -10,17 +10,21 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   usePublishChannelPanel,
   useSettingsForumThreads,
   useSettingsPanelChannels,
-} from "../hooks/settings";
-import type { SettingsResponse } from "../schemas/settings";
+  useUpdateSettings,
+} from "@/features/settings/hooks/settings";
+import type { SettingsResponse } from "@/features/settings/schemas/settings";
 
 type ChannelPanelDraft = SettingsResponse["channelPanel"];
 
-export function ChannelPanelSettingsSection({
+/**
+ * Shown on the Channel ticket panel template when Discord has no linked message yet.
+ * Saves the chosen channel (if needed) then publishes.
+ */
+export function ChannelPanelPublishCta({
   value,
   disabled = false,
   onChange,
@@ -30,8 +34,9 @@ export function ChannelPanelSettingsSection({
   onChange: (next: ChannelPanelDraft) => void;
 }) {
   const panelChannelsQuery = useSettingsPanelChannels(true);
+  const updateSettings = useUpdateSettings();
   const publishPanel = usePublishChannelPanel();
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedChannel = useMemo(
     () => panelChannelsQuery.data?.channels.find((channel) => channel.id === value.channelId),
@@ -59,70 +64,47 @@ export function ChannelPanelSettingsSection({
     [forumThreadsQuery.data?.threads],
   );
 
+  const busy = updateSettings.isPending || publishPanel.isPending;
+
   async function handlePublish() {
-    setPublishError(null);
+    setError(null);
+    if (!value.channelId) {
+      setError("Choose a channel before publishing.");
+      return;
+    }
+
     try {
-      await publishPanel.mutateAsync();
-    } catch (error) {
-      setPublishError(error instanceof Error ? error.message : "Failed to publish panel");
+      await updateSettings.mutateAsync({
+        channelPanel: {
+          enabled: true,
+          channelId: value.channelId,
+          forumThreadId: value.forumThreadId,
+          forumPostTitle: value.forumPostTitle,
+        },
+      });
+      const result = await publishPanel.mutateAsync();
+      onChange(result.channelPanel);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Failed to publish panel");
     }
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Channel ticket panel</CardTitle>
+        <CardTitle>Publish panel to Discord</CardTitle>
         <CardDescription>
-          Publish a Component V2 message in a server channel or forum post so members can open
-          tickets without DMing the bot first. Edit the panel body and buttons in the Templates
-          tab under <span className="font-medium">Channel ticket panel</span>. When a Discord
-          message is already linked, saving that template updates it automatically; otherwise use
-          Publish here or the publish prompt on the Templates tab.
+          This panel is not linked to a Discord message yet. Choose a channel and publish when
+          you are ready — saving the template alone will not post it.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="channel-panel-enabled" className="text-sm font-medium">
-              Enable channel ticket panel
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              When enabled, panel buttons open tickets and DM members the normal ticket-created
-              message.
-            </p>
-          </div>
-          <Switch
-            id="channel-panel-enabled"
-            checked={value.enabled}
-            disabled={disabled || publishPanel.isPending}
-            onCheckedChange={(enabled) => onChange({ ...value, enabled })}
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="channel-panel-repost" className="text-sm font-medium">
-              Replace message on update
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              Delete the old Discord message and post a new one when the panel updates, so Discord
-              does not show an &quot;(edited)&quot; label. Off by default (edit in place).
-            </p>
-          </div>
-          <Switch
-            id="channel-panel-repost"
-            checked={value.repostOnUpdate}
-            disabled={disabled || publishPanel.isPending}
-            onCheckedChange={(repostOnUpdate) => onChange({ ...value, repostOnUpdate })}
-          />
-        </div>
-
+      <CardContent className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label>Panel channel</Label>
           <ChannelPicker
             channels={panelChannelOptions}
             value={value.channelId ?? ""}
-            disabled={disabled || panelChannelsQuery.isLoading || publishPanel.isPending}
+            disabled={disabled || panelChannelsQuery.isLoading || busy}
             placeholder={panelChannelsQuery.isLoading ? "Loading channels…" : "Choose a channel"}
             searchPlaceholder="Search channels…"
             emptyMessage="No text or forum channels found."
@@ -144,9 +126,7 @@ export function ChannelPanelSettingsSection({
               <ChannelPicker
                 channels={forumThreadOptions}
                 value={value.forumThreadId ?? ""}
-                disabled={
-                  disabled || forumThreadsQuery.isLoading || publishPanel.isPending
-                }
+                disabled={disabled || forumThreadsQuery.isLoading || busy}
                 placeholder={
                   forumThreadsQuery.isLoading ? "Loading forum posts…" : "Auto-create post"
                 }
@@ -160,19 +140,15 @@ export function ChannelPanelSettingsSection({
                   })
                 }
               />
-              <p className="text-sm text-muted-foreground">
-                Leave blank to create a dedicated forum post when you publish. Pick an existing
-                post to host the panel message there instead.
-              </p>
             </div>
 
             {!value.forumThreadId ? (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="channel-panel-forum-title">Forum post title</Label>
+                <Label htmlFor="templates-channel-panel-forum-title">Forum post title</Label>
                 <Input
-                  id="channel-panel-forum-title"
+                  id="templates-channel-panel-forum-title"
                   value={value.forumPostTitle ?? ""}
-                  disabled={disabled || publishPanel.isPending}
+                  disabled={disabled || busy}
                   placeholder="Open a ticket"
                   onChange={(event) =>
                     onChange({
@@ -186,24 +162,17 @@ export function ChannelPanelSettingsSection({
           </>
         ) : null}
 
-        {value.messageId ? (
-          <p className="text-xs text-muted-foreground">
-            Published message ID: {value.messageId}
-            {value.forumThreadId ? ` · Forum post: ${value.forumThreadId}` : null}
-          </p>
-        ) : null}
-
-        <div className="flex flex-wrap gap-2">
+        <div>
           <Button
             type="button"
-            disabled={disabled || !value.channelId || publishPanel.isPending}
-            onClick={handlePublish}
+            disabled={disabled || !value.channelId || busy}
+            onClick={() => void handlePublish()}
           >
-            {publishPanel.isPending ? "Publishing…" : "Publish panel"}
+            {busy ? "Publishing…" : "Publish panel to Discord"}
           </Button>
         </div>
 
-        {publishError ? <p className="text-sm text-destructive">{publishError}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </CardContent>
     </Card>
   );
