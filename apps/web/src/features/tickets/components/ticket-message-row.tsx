@@ -226,8 +226,8 @@ export function MessageTimelineRow({
 }: {
   message: EnrichedMessage;
   groupPos: MessageGroupPos;
-  ticket: Pick<Ticket, "dmChannelId" | "channelId"> & {
-    participants?: Pick<ThreadParticipant, "dmChannelId">[];
+  ticket: Pick<Ticket, "dmChannelId" | "channelId" | "userId"> & {
+    participants?: Pick<ThreadParticipant, "dmChannelId" | "userId" | "role">[];
   };
   highlighted: boolean;
   replyJumpFlashing: boolean;

@@ -13,8 +13,7 @@ export async function completeChannelPanelTicketOpen(
 	interaction: ButtonInteraction | ModalSubmitInteraction,
 	user: User,
 	button: ChannelOpenButton,
-	modalVars: Record<string, unknown>,
-	options: { modalResponse?: boolean } = {}
+	modalVars: Record<string, unknown>
 ) {
 	const dm = await user.createDM().catch(() => null);
 	if (!dm) {
@@ -58,7 +57,6 @@ export async function completeChannelPanelTicketOpen(
 			user,
 			modalVars,
 			{
-				modalResponse: options.modalResponse ?? false,
 				executedBy: user.id
 			}
 		);

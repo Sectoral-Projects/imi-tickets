@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { fetchTicket, fetchTickets } from "../api/tickets";
 
 export function useTickets(search: string, status: string | null = null) {
@@ -7,6 +7,7 @@ export function useTickets(search: string, status: string | null = null) {
     queryFn: fetchTickets,
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    placeholderData: keepPreviousData,
     // 🔥 flatten pages → tickets[]
     select: (data) => ({
       ...data,

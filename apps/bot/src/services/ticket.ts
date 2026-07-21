@@ -1,7 +1,7 @@
 import { generateChannelNameRandom } from '@/lib/ticket/channelName';
 import { memberSnapshots, messages, threadParticipants, threadStatusHistory, threadTags, threads } from '@/database/sqlite/schema';
 import { container } from '@sapphire/framework';
-import { and, count, desc, eq, inArray, isNull, like, ne, or } from 'drizzle-orm';
+import { and, count, desc, eq, exists, inArray, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { AuditAction, AuditService } from './audit';
 import { RealtimeService } from './realtime';
 import { SettingsService } from './settings';
@@ -53,7 +53,10 @@ export interface ListTicketsInput {
 	cursor?: number;
 	/** Defaults to 20. */
 	limit?: number;
-	/** Matched against `subject` with a `LIKE %search%`. */
+	/**
+	 * Substring match (`LIKE %search%`) against title fields, people on the ticket
+	 * (Discord ids + identity snapshots), and non-deleted message bodies.
+	 */
 	search?: string;
 	status?: ThreadStatusType;
 	userId?: string;
@@ -230,7 +233,8 @@ export abstract class TicketService {
 	/**
 	 * Paginated, filterable ticket listing, enriched with each thread's
 	 * latest message and the opening user's latest identity snapshot.
-	 * This is the single source of truth for the tickets list endpoint â€”
+	 * Search matches titles, people on the ticket, and message content.
+	 * This is the single source of truth for the tickets list endpoint —
 	 * keep route handlers as thin wrappers around this.
 	 */
 	static listTickets(input: ListTicketsInput = {}, db: DbClient = container.sqlite): ListTicketsResult {
@@ -241,11 +245,46 @@ export abstract class TicketService {
 		if (input.search) {
 			const search = `%${input.search}%`;
 			const settings = SettingsService.getAppSettings(db);
-			if (settings.useChannelNameForTranscript) {
-				conditions.push(or(like(threads.subject, search), like(threads.staffChannelName, search)));
-			} else {
-				conditions.push(like(threads.subject, search));
-			}
+
+			const titleMatch = settings.useChannelNameForTranscript
+				? or(like(threads.subject, search), like(threads.staffChannelName, search))
+				: like(threads.subject, search);
+
+			const peopleMatch = exists(
+				db
+					.select({ one: sql`1` })
+					.from(threadParticipants)
+					.leftJoin(memberSnapshots, eq(memberSnapshots.userId, threadParticipants.userId))
+					.where(
+						and(
+							eq(threadParticipants.threadId, threads.id),
+							isNull(threadParticipants.deletedAt),
+							or(
+								like(threadParticipants.userId, search),
+								like(memberSnapshots.username, search),
+								like(memberSnapshots.globalName, search),
+								like(memberSnapshots.nickname, search)
+							)
+						)
+					)
+			);
+
+			const messageMatch = exists(
+				db
+					.select({ one: sql`1` })
+					.from(messages)
+					.where(
+						and(
+							eq(messages.threadId, threads.id),
+							isNull(messages.deletedAt),
+							like(messages.content, search)
+						)
+					)
+			);
+
+			conditions.push(
+				or(titleMatch, like(threads.userId, search), peopleMatch, messageMatch)
+			);
 		}
 		if (input.status) conditions.push(eq(threads.status, input.status));
 		if (input.userId) conditions.push(eq(threads.userId, input.userId));
