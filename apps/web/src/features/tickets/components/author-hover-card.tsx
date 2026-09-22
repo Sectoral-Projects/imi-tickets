@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/hover-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import {
   isDiscordSnowflake,
   useDiscordUser,
@@ -55,9 +56,15 @@ function RoleList({ roles }: { roles: DiscordUserRole[] }) {
 export function AuthorHoverCard({
   userId,
   children,
+  side = "right",
+  align = "start",
+  className,
 }: {
   userId: string;
   children: ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const canFetch = isDiscordSnowflake(userId);
@@ -73,13 +80,16 @@ export function AuthorHoverCard({
         render={
           <button
             type="button"
-            className="inline-flex cursor-default border-0 bg-transparent p-0 text-left"
+            className={cn(
+              "inline-flex cursor-default border-0 bg-transparent p-0 text-left",
+              className,
+            )}
           />
         }
       >
         {children}
       </HoverCardTrigger>
-      <HoverCardContent className="w-72" side="right" align="start">
+      <HoverCardContent className="w-72" side={side} align={align}>
         {query.isLoading ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-3">

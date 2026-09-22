@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveTicketDisplayTitle,
   formatTicketListTitle,
+  formatTicketListFallbackTitle,
   type TicketTitleSource,
 } from "./display-title";
 
@@ -74,5 +75,24 @@ describe("formatTicketListTitle", () => {
     expect(
       formatTicketListTitle(ticket, { useChannelNameForTranscript: true }),
     ).toBe("channel-name");
+  });
+});
+
+describe("formatTicketListFallbackTitle", () => {
+  it("returns the list title with channel name ignored", () => {
+    const ticket: TicketTitleSource = {
+      id: 2,
+      subject: "X",
+      staffChannelName: "channel-name",
+    };
+    expect(formatTicketListFallbackTitle(ticket)).toBe("X - #2");
+  });
+
+  it("returns Ticket #N when there is no subject", () => {
+    const ticket: TicketTitleSource = {
+      id: 10,
+      staffChannelName: "10-jason",
+    };
+    expect(formatTicketListFallbackTitle(ticket)).toBe("Ticket #10");
   });
 });

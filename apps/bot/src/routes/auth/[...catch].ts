@@ -5,6 +5,6 @@ import type { ApiEnv } from '@/lib/api/context';
 
 export default class Protected extends Route {
 	register(app: Hono<ApiEnv>, path: string) {
-		app.on(['POST', 'GET'], `/api${path}`, (c) => getAuth().handler(c.req.raw));
+		app.all(`/api${path}`, (c) => getAuth().handler(c.req.raw));
 	}
 }

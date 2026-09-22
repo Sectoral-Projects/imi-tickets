@@ -31,6 +31,8 @@ import {
 } from "./hooks/use-timeline-virtualizer";
 import { UnauthorizedScreen } from "@/components/unauthorized-screen";
 import { ApiError } from "@/lib/api";
+import { useTicketTyping } from "../lib/ticket-typing";
+import { TicketTypingAvatars } from "./ticket-typing-avatars";
 
 const REPLY_JUMP_FLASH_DURATION_MS = 2000;
 
@@ -243,6 +245,8 @@ export function TicketContent() {
   );
 
   useProductAccessRedirect(error ?? errorTimeline);
+  const typers = useTicketTyping(numericTicketId);
+
   useRealtime(numericTicketId, {
     onTicketMessageActivity: () => {
       if (windowReasonRef.current === "reply") {
@@ -455,7 +459,7 @@ export function TicketContent() {
             the same commit before _willUpdate writes scrollTop. */}
         <div
           ref={scrollViewportRef}
-          className="size-full overflow-auto [overflow-anchor:none] [overscroll-behavior:contain]"
+          className="size-full overflow-auto [overflow-anchor:none] overscroll-contain"
           onScroll={handleTimelineScroll}
         >
           <div
@@ -545,6 +549,11 @@ export function TicketContent() {
           </div>
         )}
       </div>
+      {ticket.status !== "closed" && typers.length > 0 ? (
+        <div className="flex shrink-0 items-center justify-end px-4 py-2">
+          <TicketTypingAvatars typers={typers} />
+        </div>
+      ) : null}
     </div>
   );
 }

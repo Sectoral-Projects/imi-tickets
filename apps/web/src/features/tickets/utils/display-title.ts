@@ -2,5 +2,6 @@
 export {
   resolveTicketDisplayTitle,
   formatTicketListTitle,
+  formatTicketListFallbackTitle,
   type TicketTitleSource,
 } from "@imi/tickets-shared";

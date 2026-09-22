@@ -21,13 +21,26 @@ export function TicketListSkeleton() {
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <Skeleton className="h-5 w-2/5" />
-                <Skeleton className="h-5 w-16 rounded-full" />
+                <div className="flex shrink-0 items-center gap-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2">
-                <Skeleton className="size-8 rounded-full" />
-                <Skeleton className="h-4 w-1/3" />
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="size-8 rounded-full" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+                <div className="flex items-center gap-1.5 rounded-full bg-muted px-2 py-1">
+                  <Skeleton className="h-1.5 w-4 rounded-full" />
+                  <div className="flex -space-x-2">
+                    <Skeleton className="size-6 rounded-full" />
+                    <Skeleton className="size-6 rounded-full" />
+                  </div>
+                  <Skeleton className="h-3 w-14" />
+                </div>
               </div>
             </CardContent>
           </Card>

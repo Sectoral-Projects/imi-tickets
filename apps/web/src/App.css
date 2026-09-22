@@ -135,6 +135,21 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --animate-reply-jump-highlight: reply-jump-highlight 2s ease-out forwards;
+  --animate-typing-dot: typing-dot 1s ease-in-out infinite;
+
+  @keyframes typing-dot {
+    0%,
+    80%,
+    100% {
+      opacity: 0.35;
+      translate: 0 0;
+    }
+
+    40% {
+      opacity: 1;
+      translate: 0 -0.15rem;
+    }
+  }
 
   @keyframes reply-jump-highlight {
     0% {

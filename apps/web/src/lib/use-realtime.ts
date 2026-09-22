@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { EnrichedTicket } from "@/features/tickets/schemas/tickets";
+import {
+  applyTypingStart,
+  clearTicketTypers,
+} from "@/features/tickets/lib/ticket-typing";
 import type { RealtimeEvent, TicketMessageActivityEvent } from "@imi/tickets-shared";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
@@ -10,6 +14,27 @@ type TicketsPage = {
   tickets: EnrichedTicket[];
   nextCursor: number | null;
 };
+
+function bumpTicketMessageCount(
+  queryClient: ReturnType<typeof useQueryClient>,
+  ticketId: number,
+) {
+  queryClient.setQueriesData<InfiniteData<TicketsPage>>({ queryKey: ["tickets"] }, (current) => {
+    if (!current) return current;
+
+    return {
+      ...current,
+      pages: current.pages.map((page) => ({
+        ...page,
+        tickets: page.tickets.map((ticket) =>
+          ticket.id === ticketId
+            ? { ...ticket, messageCount: (ticket.messageCount ?? 0) + 1 }
+            : ticket,
+        ),
+      })),
+    };
+  });
+}
 
 function patchTicketStaffChannelName(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -46,10 +71,12 @@ export function useRealtime(
 ) {
   const queryClient = useQueryClient();
 
-  // Store callback in a ref so WebSocket handler always calls the latest
-  // version without needing the callback in the effect dependency array.
+  // Keep the latest callback in a ref so the socket handler can call it
+  // without putting the function in the WebSocket effect deps.
   const onActivityRef = useRef(options?.onTicketMessageActivity);
-  onActivityRef.current = options?.onTicketMessageActivity;
+  useEffect(() => {
+    onActivityRef.current = options?.onTicketMessageActivity;
+  });
 
   useEffect(() => {
     const ws = new WebSocket(`${WS_BASE}/ws`);
@@ -57,6 +84,19 @@ export function useRealtime(
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(String(event.data)) as RealtimeEvent;
+
+        if (data.type === "typing.start") {
+          applyTypingStart({
+            ...data,
+            ticketId: Number(data.ticketId),
+          });
+          return;
+        }
+
+        if (data.type === "message.created") {
+          clearTicketTypers(data.ticketId, data.authorId);
+          bumpTicketMessageCount(queryClient, data.ticketId);
+        }
 
         if (data.type === "ticket.updated" && data.staffChannelName !== undefined) {
           patchTicketStaffChannelName(queryClient, data.ticketId, data.staffChannelName);

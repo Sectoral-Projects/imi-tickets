@@ -18,6 +18,14 @@ export async function replyChannelPanelTicketAck(
 ) {
 	const components = await ChannelTicketPanelAck.render(ACK_COPY[kind]);
 
+	if (interaction.deferred) {
+		await interaction.editReply({
+			components,
+			flags: [MessageFlags.IsComponentsV2]
+		});
+		return;
+	}
+
 	await interaction.reply({
 		components,
 		flags: interaction.inGuild()

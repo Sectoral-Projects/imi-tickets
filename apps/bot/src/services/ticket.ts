@@ -65,6 +65,7 @@ export interface ListTicketsInput {
 export type EnrichedTicket = typeof threads.$inferSelect & {
 	latestMessage: typeof messages.$inferSelect | null;
 	user: typeof memberSnapshots.$inferSelect | null;
+	messageCount: number;
 };
 
 export interface ListTicketsResult {
@@ -320,10 +321,22 @@ export abstract class TicketService {
 			if (!userMap.has(snap.userId)) userMap.set(snap.userId, snap);
 		}
 
+		const messageCountsRaw = db
+			.select({ threadId: messages.threadId, value: count() })
+			.from(messages)
+			.where(and(inArray(messages.threadId, threadIds), isNull(messages.deletedAt)))
+			.groupBy(messages.threadId)
+			.all();
+		const messageCountMap = new Map<number, number>();
+		for (const row of messageCountsRaw) {
+			messageCountMap.set(row.threadId, row.value);
+		}
+
 		const enriched: EnrichedTicket[] = tickets.map((t) => ({
 			...t,
 			latestMessage: latestMessagesMap.get(t.id) ?? null,
-			user: userMap.get(t.userId) ?? null
+			user: userMap.get(t.userId) ?? null,
+			messageCount: messageCountMap.get(t.id) ?? 0
 		}));
 
 		return { tickets: enriched, nextCursor };
