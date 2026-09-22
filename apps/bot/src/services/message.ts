@@ -137,7 +137,8 @@ export abstract class MessageService {
 		RealtimeService.publish({
 			type: 'message.created',
 			ticketId: data.threadId,
-			messageId: message.id
+			messageId: message.id,
+			authorId: data.authorId
 		});
 
 		return message;

@@ -1,7 +1,7 @@
 {
   "name": "imi-tickets",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Discord modmail with a staff web UI",
   "license": "MIT",
   "packageManager": "pnpm@9.15.0",

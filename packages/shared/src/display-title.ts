@@ -38,3 +38,10 @@ export function formatTicketListTitle(
   if (title === `Ticket #${ticket.id}`) return title;
   return `${title} - #${ticket.id}`;
 }
+
+/**
+ * List title as it would appear with "Use channel name for transcript title" off.
+ */
+export function formatTicketListFallbackTitle(ticket: TicketTitleSource): string {
+  return formatTicketListTitle(ticket);
+}

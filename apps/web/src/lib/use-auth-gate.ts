@@ -29,6 +29,7 @@ export function useSetupRedirect() {
   useEffect(() => {
     if (!session.data || setupStatus.isPending) return;
     if (location.pathname === "/onboarding") return;
+    if (location.pathname === "/terms" || location.pathname === "/privacy") return;
     if (setupStatus.data?.complete) return;
 
     navigate("/onboarding", { replace: true });

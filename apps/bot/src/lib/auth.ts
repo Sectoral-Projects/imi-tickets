@@ -1,8 +1,39 @@
-import { betterAuth, DiscordProfile, OAuth2Tokens } from 'better-auth';
+import { betterAuth, type DiscordProfile, type OAuth2Tokens } from 'better-auth';
 import { betterFetch } from '@better-fetch/fetch';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { container } from '@sapphire/pieces';
 import * as schema from '@/database/sqlite/auth';
+
+function discordPlaceholderEmail(profile: DiscordProfile) {
+	return profile.email ?? profile.id;
+}
+
+function discordDisplayName(profile: DiscordProfile) {
+	return profile.global_name || profile.username || '';
+}
+
+function discordAvatarUrl(profile: DiscordProfile) {
+	if (profile.avatar === null) {
+		const defaultAvatarNumber =
+			profile.discriminator === '0'
+				? Number(BigInt(profile.id) >> BigInt(22)) % 6
+				: parseInt(profile.discriminator) % 5;
+		return `https://cdn.discordapp.com/embed/avatars/${defaultAvatarNumber}.png`;
+	}
+
+	const format = profile.avatar.startsWith('a_') ? 'gif' : 'png';
+	return `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.${format}`;
+}
+
+/** Mutable local-user fields only. 1.7 rejects `id` from getUserInfo / mapProfileToUser. */
+function discordUserFields(profile: DiscordProfile) {
+	return {
+		name: discordDisplayName(profile),
+		email: discordPlaceholderEmail(profile),
+		emailVerified: false as const,
+		image: discordAvatarUrl(profile)
+	};
+}
 
 function createAuth() {
 	return betterAuth({
@@ -18,52 +49,29 @@ function createAuth() {
 				disableDefaultScope: true,
 				prompt: 'consent',
 				getUserInfo: async (tokens: OAuth2Tokens) => {
-					const { data: profile, error } = await betterFetch<DiscordProfile>('https://discord.com/api/users/@me', {
-						headers: {
-							authorization: `Bearer ${tokens.accessToken}`
+					const { data: profile, error } = await betterFetch<DiscordProfile>(
+						'https://discord.com/api/users/@me',
+						{
+							headers: {
+								authorization: `Bearer ${tokens.accessToken}`
+							}
 						}
-					});
+					);
 
 					if (error) {
 						return Promise.reject(error);
 					}
 
-					if (profile.avatar === null) {
-						const defaultAvatarNumber =
-							profile.name === '0' ? Number(BigInt(profile.id) >> BigInt(22)) % 6 : parseInt(profile.discriminator) % 5;
-						profile.avatar = `https://cdn.discordapp.com/embed/avatars/${defaultAvatarNumber}.png`;
-					} else {
-						const format = profile.avatar.startsWith('a_') ? 'gif' : 'png';
-						profile.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.${format}`;
-					}
-
 					return {
-						user: {
-							id: profile.id,
-							name: profile.global_name || profile.username || '',
-							email: profile.id,
-							emailVerified: false,
-							image: profile.avatar
-						},
+						user: discordUserFields(profile),
 						data: {
 							...profile,
-							email: profile.id
+							email: discordPlaceholderEmail(profile)
 						}
 					};
 				},
 				overrideUserInfoOnSignIn: true,
-				mapProfileToUser: async (profile: DiscordProfile) => {
-					if (profile.avatar === null) {
-						const defaultAvatarNumber =
-							profile.discriminator === '0' ? Number(BigInt(profile.id) >> BigInt(22)) % 6 : parseInt(profile.discriminator) % 5;
-						profile.avatar = `https://cdn.discordapp.com/embed/avatars/${defaultAvatarNumber}.png`;
-					} else {
-						const format = profile.avatar.startsWith('a_') ? 'gif' : 'png';
-						profile.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.${format}`;
-					}
-
-					return profile;
-				}
+				mapProfileToUser: (profile: DiscordProfile) => discordUserFields(profile)
 			}
 		},
 		baseURL: process.env.BETTER_AUTH_URL ?? 'http://localhost:4000',

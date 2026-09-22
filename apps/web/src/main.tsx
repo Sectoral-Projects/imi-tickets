@@ -14,6 +14,8 @@ import Ticket from "./Ticket.tsx";
 import Onboarding from "./Onboarding.tsx";
 import Features from "./Features.tsx";
 import About from "./About.tsx";
+import Terms from "./Terms.tsx";
+import Privacy from "./Privacy.tsx";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +30,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/" element={<App />} />
               <Route path="/features" element={<Features />} />
               <Route path="/about" element={<About />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
               <Route path="/staff" element={<Staff />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/:ticketId" element={<Ticket />} />

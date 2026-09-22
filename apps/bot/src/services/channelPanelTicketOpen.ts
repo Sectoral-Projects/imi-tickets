@@ -7,7 +7,7 @@ import { SettingsService } from '@/services/settings';
 import { TemplateButtonService } from '@/services/templateButton';
 import { TicketOpenService } from '@/services/ticketOpen';
 import type { ChannelOpenButton } from '@/services/channelOpenButton';
-import type { ButtonInteraction, ModalSubmitInteraction, User } from 'discord.js';
+import { MessageFlags, type ButtonInteraction, type ModalSubmitInteraction, type User } from 'discord.js';
 
 export async function completeChannelPanelTicketOpen(
 	interaction: ButtonInteraction | ModalSubmitInteraction,
@@ -15,11 +15,11 @@ export async function completeChannelPanelTicketOpen(
 	button: ChannelOpenButton,
 	modalVars: Record<string, unknown>
 ) {
+	await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 	const dm = await user.createDM().catch(() => null);
 	if (!dm) {
-		await interaction.reply({
-			content: "I couldn't DM you. Enable DMs from server members and try again.",
-			ephemeral: true
+		await interaction.editReply({
+			content: "I couldn't DM you. Enable DMs from server members and try again."
 		});
 		return;
 	}

@@ -2,6 +2,8 @@ import { shouldRelayStaffTicketActivity } from '@/lib/discord/ticketRelay';
 import { SettingsService } from '@/services/settings';
 import { TicketChannelService } from '@/services/ticketChannel';
 import { TicketService } from '@/services/ticket';
+import { MemberSnapshotService } from '@/services/snapshot';
+import { RealtimeService } from '@/services/realtime';
 import { ApplyOptions } from '@sapphire/decorators';
 import { Events, Listener } from '@sapphire/framework';
 import { ChannelType } from 'discord.js';
@@ -13,18 +15,46 @@ const STAFF_CHANNEL_TYPES = new Set<ChannelType>([
 	ChannelType.AnnouncementThread
 ]);
 
+function publishTicketTyping(ticketId: number, userId: string) {
+	const snapshot = MemberSnapshotService.findLatestForUser(userId);
+	RealtimeService.publish({
+		type: 'typing.start',
+		ticketId,
+		userId,
+		username: snapshot?.username ?? null,
+		globalName: snapshot?.globalName ?? null,
+		avatar: snapshot?.avatar ?? null
+	});
+}
+
+function publishFromGatewayPacket(userId: string, channelId: string, guildId?: string) {
+	if (!guildId) {
+		const thread = TicketService.findOpenThreadForUser(userId);
+		if (thread) publishTicketTyping(thread.id, userId);
+		return;
+	}
+
+	const thread = TicketService.findOpenByStaffChannelId(channelId);
+	if (thread) publishTicketTyping(thread.id, userId);
+}
+
 @ApplyOptions<Listener.Options>({
 	name: 'typingStart',
 	event: Events.Raw
 })
 export class TypingEvent extends Listener {
-	public override async run(packet: { t?: string; d?: { user_id?: string; channel_id?: string } }) {
+	public override async run(packet: {
+		t?: string;
+		d?: { user_id?: string; channel_id?: string; guild_id?: string };
+	}) {
 		if (packet.t !== 'TYPING_START') return;
 
 		const userId = packet.d?.user_id;
 		const channelId = packet.d?.channel_id;
 		if (!userId || !channelId) return;
 		if (userId === this.container.client.user?.id) return;
+
+		publishFromGatewayPacket(userId, channelId, packet.d?.guild_id);
 
 		const channel = await this.container.client.channels.fetch(channelId).catch(() => null);
 		if (!channel?.isTextBased()) return;
@@ -36,7 +66,7 @@ export class TypingEvent extends Listener {
 
 		if (!STAFF_CHANNEL_TYPES.has(channel.type)) return;
 
-		const guildId = 'guild' in channel ? channel.guild?.id : undefined;
+		const guildId = packet.d?.guild_id ?? ('guild' in channel ? channel.guild?.id : undefined);
 		await this.relayStaffTypingToMember(channelId, userId, guildId);
 	}
 

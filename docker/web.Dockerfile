@@ -3,6 +3,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 ARG VITE_API_URL=http://localhost:4000
+ARG VITE_LEGAL_NAME=CHANGE_ME
+ARG VITE_LEGAL_JURISDICTION=CHANGE_ME
+ARG VITE_LEGAL_URL=http://localhost:5173
+ARG VITE_LEGAL_CONTACT=CHANGE_ME
 
 # Copy workspace config
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
@@ -18,7 +22,7 @@ COPY apps/web/ apps/web/
 
 # Build shared then web
 RUN pnpm --filter @imi/tickets-shared build
-RUN VITE_API_URL=$VITE_API_URL pnpm --filter @imi/tickets-web build
+RUN VITE_API_URL=$VITE_API_URL VITE_LEGAL_NAME=$VITE_LEGAL_NAME VITE_LEGAL_JURISDICTION=$VITE_LEGAL_JURISDICTION VITE_LEGAL_URL=$VITE_LEGAL_URL VITE_LEGAL_CONTACT=$VITE_LEGAL_CONTACT pnpm --filter @imi/tickets-web build
 
 # Serve with nginx
 FROM nginx:alpine AS production

@@ -23,6 +23,10 @@ services:
       dockerfile: docker/web.Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+        VITE_LEGAL_NAME: ${VITE_LEGAL_NAME:-CHANGE_ME}
+        VITE_LEGAL_JURISDICTION: ${VITE_LEGAL_JURISDICTION:-CHANGE_ME}
+        VITE_LEGAL_URL: ${VITE_LEGAL_URL:-http://localhost:5173}
+        VITE_LEGAL_CONTACT: ${VITE_LEGAL_CONTACT:-CHANGE_ME}
     restart: unless-stopped
     ports:
       # Host port : container port (nginx listens on 80 inside the image)

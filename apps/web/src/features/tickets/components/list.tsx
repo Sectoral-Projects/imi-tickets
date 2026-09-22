@@ -22,9 +22,19 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { TicketListSkeleton } from "./ticket-list-skeleton";
 import { AuthorHoverCard } from "./author-hover-card";
 import { ticketStatusBadgeVariant } from "../utils/status-badge";
-import { formatTicketListTitle } from "../utils/display-title";
+import {
+  formatTicketListFallbackTitle,
+  formatTicketListTitle,
+} from "../utils/display-title";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { UnauthorizedScreen } from "@/components/unauthorized-screen";
 import { ApiError } from "@/lib/api";
+import { getTicketTypers, useTypingStoreVersion } from "../lib/ticket-typing";
+import { TicketTypingAvatars } from "./ticket-typing-avatars";
 
 type TicketStatusFilter = "all" | "open" | "closed";
 
@@ -62,6 +72,7 @@ export function TicketList() {
 
   useProductAccessRedirect(error);
   useRealtime();
+  const typingVersion = useTypingStoreVersion();
 
   const tickets = useMemo(() => data?.tickets ?? [], [data?.tickets]);
   const contentReady = !isLoading && Boolean(data);
@@ -87,10 +98,10 @@ export function TicketList() {
     getScrollElement: () => scrollViewportRef.current,
     estimateSize: (index) => {
       const item = listRenderItems[index];
-      if (!item) return 120;
+      if (!item) return 152;
       if (item.kind === "load-sentinel") return 40;
       if (item.kind === "end-marker") return 56;
-      return 120;
+      return 152;
     },
     getItemKey: (index) => {
       const item = listRenderItems[index];
@@ -181,7 +192,7 @@ export function TicketList() {
             value={status}
             onValueChange={(value) => setStatus(value as TicketStatusFilter)}
           >
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-40">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
 
@@ -213,6 +224,7 @@ export function TicketList() {
               {virtualItems.map((virtualItem) => {
                 const item = listRenderItems[virtualItem.index];
                 if (!item) return null;
+                void typingVersion;
 
                 return (
                   <div
@@ -227,6 +239,7 @@ export function TicketList() {
                     {item.kind === "ticket" && (
                       <TicketListItem
                         ticket={item.ticket}
+                        typers={getTicketTypers(item.ticket.id)}
                         useChannelNameForTranscript={useChannelNameForTranscript}
                       />
                     )}
@@ -269,16 +282,57 @@ function ticketOpenerAvatarUrl(ticket: EnrichedTicket) {
   return `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`;
 }
 
+function TicketListTitle({
+  ticketId,
+  title,
+  fallbackTitle,
+}: {
+  ticketId: number;
+  title: string;
+  fallbackTitle: string;
+}) {
+  const showFallbackTooltip = title !== fallbackTitle;
+
+  if (!showFallbackTooltip) {
+    return <div className="min-w-0 text-lg font-medium">{title}</div>;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        delay={200}
+        render={
+          <Link
+            to={`/${ticketId}`}
+            className="relative z-10 min-w-0 text-lg font-medium pointer-events-auto"
+          />
+        }
+      >
+        {title}
+      </TooltipTrigger>
+      <TooltipContent side="top">{fallbackTitle}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TicketListItem({
   ticket,
+  typers,
   useChannelNameForTranscript,
 }: {
   ticket: EnrichedTicket;
+  typers: ReturnType<typeof getTicketTypers>;
   useChannelNameForTranscript: boolean;
 }) {
+  "use no memo";
+
   const title = formatTicketListTitle(ticket, { useChannelNameForTranscript });
+  const fallbackTitle = formatTicketListFallbackTitle(ticket);
   const openerLabel = ticketOpenerLabel(ticket);
   const openerInitials = openerLabel.slice(0, 2).toUpperCase();
+  const messageCount = ticket.messageCount ?? 0;
+  const messageCountLabel =
+    messageCount === 1 ? "1 message" : `${messageCount} messages`;
 
   return (
     <Card className="relative transition-colors hover:bg-muted/40">
@@ -289,8 +343,13 @@ function TicketListItem({
       />
       <CardHeader className="relative z-10 pointer-events-none">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 text-lg font-medium">{title}</div>
+          <TicketListTitle
+            ticketId={ticket.id}
+            title={title}
+            fallbackTitle={fallbackTitle}
+          />
           <div className="flex shrink-0 items-center gap-2">
+            <span className="text-sm text-muted-foreground">{messageCountLabel}</span>
             <Badge
               variant={ticketStatusBadgeVariant(ticket.status)}
               className="text-sm capitalize"
@@ -301,21 +360,26 @@ function TicketListItem({
         </div>
       </CardHeader>
       <CardContent className="relative z-10 pointer-events-none">
-        <div className="pointer-events-auto w-fit max-w-full">
-          <AuthorHoverCard userId={ticket.userId}>
-            <span className="inline-flex max-w-full items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Avatar className="size-8">
-                <AvatarImage
-                  src={ticketOpenerAvatarUrl(ticket)}
-                  alt={openerLabel}
-                />
-                <AvatarFallback className="text-xs">{openerInitials}</AvatarFallback>
-              </Avatar>
-              <span className="truncate text-sm text-muted-foreground">
-                {openerLabel}
+        <div className="flex items-center justify-between gap-3">
+          <div className="pointer-events-auto w-fit min-w-0 max-w-full">
+            <AuthorHoverCard userId={ticket.userId}>
+              <span className="inline-flex max-w-full items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <Avatar className="size-8">
+                  <AvatarImage
+                    src={ticketOpenerAvatarUrl(ticket)}
+                    alt={openerLabel}
+                  />
+                  <AvatarFallback className="text-xs">{openerInitials}</AvatarFallback>
+                </Avatar>
+                <span className="truncate text-sm text-muted-foreground">
+                  {openerLabel}
+                </span>
               </span>
-            </span>
-          </AuthorHoverCard>
+            </AuthorHoverCard>
+          </div>
+          {ticket.status !== "closed" && typers.length > 0 ? (
+            <TicketTypingAvatars typers={typers} />
+          ) : null}
         </div>
       </CardContent>
     </Card>

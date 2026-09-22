@@ -20,7 +20,7 @@ const Footer = ({ className }: { className?: string }) => {
           </div>
         </Link>
 
-        <div className="flex items-center gap-5 whitespace-nowrap">
+        <div className="flex flex-wrap items-center justify-center gap-5">
           <Link
             to="/about"
             className="opacity-80 transition-opacity duration-300 hover:opacity-100"
@@ -32,6 +32,18 @@ const Footer = ({ className }: { className?: string }) => {
             className="opacity-80 transition-opacity duration-300 hover:opacity-100"
           >
             Features
+          </Link>
+          <Link
+            to="/terms"
+            className="opacity-80 transition-opacity duration-300 hover:opacity-100"
+          >
+            Terms
+          </Link>
+          <Link
+            to="/privacy"
+            className="opacity-80 transition-opacity duration-300 hover:opacity-100"
+          >
+            Privacy
           </Link>
         </div>
 

@@ -58,6 +58,7 @@ export const ticketWithParticipantsSchema = ticketSchema.extend({
 export const enrichedTicketSchema = ticketSchema.extend({
   latestMessage: latestMessageSchema.nullable(),
   user: memberSnapshotSchema.nullable(),
+  messageCount: z.number().int().nonnegative(),
 });
 
 export type LatestMessage = z.infer<typeof latestMessageSchema>;
